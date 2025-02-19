@@ -515,6 +515,45 @@ def manage_folders():
         and not d.startswith('__')
     ]
     
+    # Initialize session state variables if they don't exist
+    if 'show_rename' not in st.session_state:
+        st.session_state.show_rename = False
+    if 'confirm_delete' not in st.session_state:
+        st.session_state.confirm_delete = False
+    if 'show_info' not in st.session_state:
+        st.session_state.show_info = False
+    if 'show_create' not in st.session_state:
+        st.session_state.show_create = False
+    
+    # Create New Folder button
+    if st.button("📁 Create New Folder", use_container_width=True):
+        st.session_state.show_create = True
+    
+    # Handle Create
+    if st.session_state.show_create:
+        new_folder_name = st.text_input("Enter folder name:")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Create"):
+                if new_folder_name:
+                    try:
+                        new_folder_path = os.path.join(REPORTS_DIR, new_folder_name)
+                        if os.path.exists(new_folder_path):
+                            st.error("Folder already exists!")
+                        else:
+                            os.makedirs(new_folder_path)
+                            st.success(f"Folder '{new_folder_name}' created successfully!")
+                            st.session_state.show_create = False
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Error creating folder: {str(e)}")
+                else:
+                    st.warning("Please enter a folder name")
+        with col2:
+            if st.button("Cancel Creation"):
+                st.session_state.show_create = False
+                st.rerun()
+    
     # Folder selection
     selected_folder = st.selectbox("Select folder to view/manage:", officer_folders)
     
@@ -533,6 +572,49 @@ def manage_folders():
         with col3:
             if st.button("ℹ️ Folder Info", use_container_width=True):
                 st.session_state.show_info = True
+        
+        # Handle Rename
+        if st.session_state.show_rename:
+            new_name = st.text_input("Enter new folder name:", selected_folder)
+            if st.button("Confirm Rename"):
+                try:
+                    new_path = os.path.join(REPORTS_DIR, new_name)
+                    os.rename(folder_path, new_path)
+                    st.success(f"Folder renamed to {new_name}")
+                    st.session_state.show_rename = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error renaming folder: {str(e)}")
+        
+        # Handle Delete
+        if st.session_state.confirm_delete:
+            st.warning(f"Are you sure you want to delete {selected_folder}?")
+            if st.button("Yes, Delete"):
+                try:
+                    shutil.rmtree(folder_path)
+                    st.success(f"Folder {selected_folder} deleted")
+                    st.session_state.confirm_delete = False
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error deleting folder: {str(e)}")
+            if st.button("Cancel"):
+                st.session_state.confirm_delete = False
+                st.rerun()
+        
+        # Handle Info
+        if st.session_state.show_info:
+            st.subheader("Folder Information")
+            num_files = len([f for f in os.listdir(folder_path) if f.endswith('.json')])
+            created_date = datetime.fromtimestamp(os.path.getctime(folder_path))
+            modified_date = datetime.fromtimestamp(os.path.getmtime(folder_path))
+            
+            st.write(f"Number of reports: {num_files}")
+            st.write(f"Created: {created_date.strftime('%Y-%m-%d %H:%M:%S')}")
+            st.write(f"Last modified: {modified_date.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            if st.button("Close Info"):
+                st.session_state.show_info = False
+                st.rerun()
         
         # Display folder contents with enhanced visuals
         st.markdown("### 📂 Folder Contents")
