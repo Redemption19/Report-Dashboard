@@ -42,13 +42,18 @@ def init_folders():
 """)
 
 def save_report(officer_name, report_data):
-    """Save report to JSON file in officer's folder"""
+    """Save report to JSON file in officer's reports folder"""
     officer_dir = os.path.join(REPORTS_DIR, officer_name)
+    reports_dir = os.path.join(officer_dir, 'reports')  # Save in reports subfolder
+    
+    # Create directories if they don't exist
     if not os.path.exists(officer_dir):
         os.makedirs(officer_dir)
+    if not os.path.exists(reports_dir):
+        os.makedirs(reports_dir)
     
     filename = f"{report_data['date']}_{report_data['type']}.json"
-    filepath = os.path.join(officer_dir, filename)
+    filepath = os.path.join(reports_dir, filename)
     
     with open(filepath, 'w') as f:
         json.dump(report_data, f, indent=4)
