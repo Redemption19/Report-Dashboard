@@ -7,6 +7,17 @@ import shutil
 from io import BytesIO
 import plotly.graph_objects as go
 
+
+# Add these imports at the top of your file
+from task_management_dash import (
+    create_task_dashboard,
+    save_task,
+    load_tasks,
+    TASK_PRIORITIES,
+    TASK_STATUSES,
+    TASK_CATEGORIES
+)
+
 # Configuration and Constants
 REPORTS_DIR = "officer_reports"
 REPORT_TYPES = ["Daily", "Weekly"]
@@ -17,6 +28,12 @@ TEMPLATE_EXTENSIONS = ['.json', '.txt', '.md']
 ALLOWED_ATTACHMENT_TYPES = ['png', 'jpg', 'jpeg', 'pdf', 'doc', 'docx', 'xlsx', 'csv']
 AUTO_ARCHIVE_DAYS = 30  # Reports older than this will be auto-archived
 
+# Add to your existing constants
+TASK_DIR = os.path.join(REPORTS_DIR, "Tasks")
+TASK_PRIORITIES = ["High", "Medium", "Low"]
+TASK_STATUSES = ["Pending", "In Progress", "Completed", "Overdue"]
+TASK_CATEGORIES = ["Work", "Personal", "Urgent", "Meeting", "Project", "Other"]
+
 def init_folders():
     """Initialize necessary folders if they don't exist"""
     # Create main reports directory
@@ -24,7 +41,8 @@ def init_folders():
         os.makedirs(REPORTS_DIR)
     
     # Create additional organizational folders
-    for folder in ADDITIONAL_FOLDERS:
+    folders_to_create = ADDITIONAL_FOLDERS + ["Tasks"]
+    for folder in folders_to_create:
         folder_path = os.path.join(REPORTS_DIR, folder)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -42,19 +60,17 @@ def init_folders():
 """)
 
 def save_report(officer_name, report_data):
-    """Save report to JSON file in officer's reports folder"""
+    """Save report to JSON file in officer's folder"""
+    # Create main officer directory if it doesn't exist
     officer_dir = os.path.join(REPORTS_DIR, officer_name)
-    reports_dir = os.path.join(officer_dir, 'reports')  # Save in reports subfolder
-    
-    # Create directories if they don't exist
     if not os.path.exists(officer_dir):
         os.makedirs(officer_dir)
-    if not os.path.exists(reports_dir):
-        os.makedirs(reports_dir)
     
+    # Create filename with date and type
     filename = f"{report_data['date']}_{report_data['type']}.json"
-    filepath = os.path.join(reports_dir, filename)
+    filepath = os.path.join(officer_dir, filename)
     
+    # Save the report
     with open(filepath, 'w') as f:
         json.dump(report_data, f, indent=4)
     return filepath
@@ -62,18 +78,46 @@ def save_report(officer_name, report_data):
 def load_reports(officer_name=None):
     """Load all reports or reports for a specific officer"""
     reports = []
+    
     if officer_name:
+        # Check the direct officer directory
         officer_dir = os.path.join(REPORTS_DIR, officer_name)
-        reports_dir = os.path.join(officer_dir, 'reports')  # Look in reports subfolder
-        if os.path.exists(reports_dir):
-            for filename in os.listdir(reports_dir):
-                if filename.endswith('.json'):  # Only process JSON files
+        if os.path.exists(officer_dir):
+            # Look for reports in the main directory
+            for filename in os.listdir(officer_dir):
+                if filename.endswith('.json'):
                     try:
-                        with open(os.path.join(reports_dir, filename), 'r') as f:
-                            reports.append(json.load(f))
+                        filepath = os.path.join(officer_dir, filename)
+                        with open(filepath, 'r') as f:
+                            report_data = json.load(f)
+                            # Ensure officer_name is in the report data
+                            report_data['officer_name'] = officer_name
+                            reports.append(report_data)
                     except Exception as e:
                         st.warning(f"Error reading report {filename}: {str(e)}")
                         continue
+            
+            # Also check the reports subfolder if it exists
+            reports_subdir = os.path.join(officer_dir, 'reports')
+            if os.path.exists(reports_subdir):
+                for filename in os.listdir(reports_subdir):
+                    if filename.endswith('.json'):
+                        try:
+                            filepath = os.path.join(reports_subdir, filename)
+                            with open(filepath, 'r') as f:
+                                report_data = json.load(f)
+                                # Ensure officer_name is in the report data
+                                report_data['officer_name'] = officer_name
+                                reports.append(report_data)
+                        except Exception as e:
+                            st.warning(f"Error reading report {filename}: {str(e)}")
+                            continue
+    else:
+        # Load reports for all officers
+        for officer_folder in os.listdir(REPORTS_DIR):
+            if officer_folder not in ADDITIONAL_FOLDERS and os.path.isdir(os.path.join(REPORTS_DIR, officer_folder)):
+                reports.extend(load_reports(officer_folder))
+    
     return reports
 
 def load_template(template_name):
@@ -99,13 +143,11 @@ def save_template(template_name, template_data):
 
 def generate_summary(start_date=None, end_date=None, officer_name=None):
     """Generate a summary report for the specified period"""
-    reports = []
-    for officer in os.listdir(REPORTS_DIR):
-        if officer not in ADDITIONAL_FOLDERS and os.path.isdir(os.path.join(REPORTS_DIR, officer)):
-            if officer_name and officer != officer_name:
-                continue
-            officer_reports = load_reports(officer)
-            reports.extend(officer_reports)
+    # Load all reports using load_reports function
+    if officer_name and officer_name != "All Officers":
+        reports = load_reports(officer_name)
+    else:
+        reports = load_reports()
     
     if not reports:
         return None
@@ -135,7 +177,7 @@ def generate_summary(start_date=None, end_date=None, officer_name=None):
         'report_types': df['type'].value_counts().to_dict(),
         'officer_activity': df['officer_name'].value_counts().to_dict(),
         'company_distribution': df['company_name'].value_counts().to_dict(),
-        'recent_reports': recent_reports_list  # Use the converted list
+        'recent_reports': recent_reports_list
     }
     
     return summary
@@ -199,9 +241,12 @@ def report_form():
     
     # File attachments
     st.subheader("Attachments")
-    uploaded_files = st.file_uploader("Upload attachments", 
-                                    accept_multiple_files=True,
-                                    type=ALLOWED_ATTACHMENT_TYPES)
+    try:
+        uploaded_files = st.file_uploader("Upload attachments", 
+                                        accept_multiple_files=True,
+                                        type=ALLOWED_ATTACHMENT_TYPES)
+    except Exception as e:
+        st.error(f"Error uploading files: {str(e)}")
     
     if st.button("Submit Report"):
         if officer_name and tasks:
@@ -242,6 +287,27 @@ def report_form():
                 # Auto-archive old reports
                 auto_archive_old_reports()
                 
+                # Create related tasks
+                if st.checkbox("Create related tasks?"):
+                    st.subheader("Create Related Tasks")
+                    task_title = st.text_input("Task Title")
+                    task_priority = st.selectbox("Priority", TASK_PRIORITIES)
+                    task_category = st.selectbox("Category", TASK_CATEGORIES)
+                    due_date = st.date_input("Due Date")
+                    
+                    if st.button("Add Task"):
+                        task_data = {
+                            "title": task_title,
+                            "priority": task_priority,
+                            "category": task_category,
+                            "status": "Pending",
+                            "due_date": due_date.strftime("%Y-%m-%d"),
+                            "assigned_to": officer_name,
+                            "linked_report": report_data.get("report_id"),
+                            "created_date": datetime.now().strftime("%Y-%m-%d")
+                        }
+                        save_task(task_data)
+                        st.success("Task created and linked to report!")
             except Exception as e:
                 st.error(f"Error saving report: {str(e)}")
         else:
@@ -275,7 +341,7 @@ def view_reports():
     with col2:
         report_type = st.selectbox(
             "Report Type",
-            ["All Types", "Daily", "Weekly", "Monthly", "Special"]
+            ["All Types"] + REPORT_TYPES
         )
     
     with col3:
@@ -284,51 +350,40 @@ def view_reports():
             ["Newest First", "Oldest First"]
         )
 
-    # Collect reports
-    report_list = []
-    officers_to_check = [selected_officer] if selected_officer != "All Officers" else officer_folders
-    
-    for officer in officers_to_check:
-        if officer != "All Officers":
-            officer_path = os.path.join(REPORTS_DIR, officer)
-            if os.path.isdir(officer_path):
-                for report_file in os.listdir(officer_path):
-                    if report_file.endswith('.json'):
-                        try:
-                            with open(os.path.join(officer_path, report_file), 'r') as f:
-                                report_data = json.load(f)
-                                report_data['file_name'] = report_file
-                                report_data['officer_name'] = officer
-                                report_list.append(report_data)
-                        except Exception as e:
-                            st.warning(f"Error reading report {report_file}: {str(e)}")
-                            continue
+    # Load reports using the load_reports function
+    if selected_officer != "All Officers":
+        all_reports = load_reports(selected_officer)
+    else:
+        all_reports = load_reports()  # This will load all reports
 
     # Filter by report type if selected
     if report_type != "All Types":
-        report_list = [r for r in report_list if r.get('type') == report_type]
+        all_reports = [r for r in all_reports if r.get('type') == report_type]
 
-    # Sort reports
-    report_list.sort(
-        key=lambda x: datetime.strptime(x.get('date', '1900-01-01'), '%Y-%m-%d'),
-        reverse=(sort_order == "Newest First")
-    )
-
-    if report_list:
+    if all_reports:
+        # Convert to DataFrame
+        df = pd.DataFrame(all_reports)
+        
+        # Convert date strings to datetime for sorting
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Sort based on user selection
+        df = df.sort_values('date', ascending=(sort_order == "Oldest First"))
+        
         # Statistics Section
         st.subheader("Report Statistics")
         stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
         
         with stat_col1:
-            st.metric("Total Reports", len(report_list))
+            st.metric("Total Reports", len(df))
         with stat_col2:
-            unique_companies = len(set(r.get('company_name', '') for r in report_list))
+            unique_companies = len(df['company_name'].unique())
             st.metric("Companies", unique_companies)
         with stat_col3:
-            unique_officers = len(set(r.get('officer_name', '') for r in report_list))
+            unique_officers = len(df['officer_name'].unique())
             st.metric("Officers", unique_officers)
         with stat_col4:
-            report_types = len(set(r.get('type', '') for r in report_list))
+            report_types = len(df['type'].unique())
             st.metric("Report Types", report_types)
 
         # Charts Section
@@ -336,18 +391,11 @@ def view_reports():
         chart_col1, chart_col2 = st.columns(2)
 
         with chart_col1:
-            # Bar Chart
-            type_counts = {
-                'Daily': 0, 'Weekly': 0, 'Monthly': 0, 'Special': 0
-            }
-            for report in report_list:
-                report_type = report.get('type', 'Daily')
-                if report_type in type_counts:
-                    type_counts[report_type] += 1
-
+            # Bar Chart: Report Types Distribution
+            type_counts = df['type'].value_counts()
             bar_fig = go.Figure(data=[go.Bar(
-                x=list(type_counts.keys()),
-                y=list(type_counts.values()),
+                x=type_counts.index,
+                y=type_counts.values,
                 marker_color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
             )])
             
@@ -364,15 +412,15 @@ def view_reports():
             st.plotly_chart(bar_fig, use_container_width=True)
 
         with chart_col2:
-            # Pie Chart
+            # Pie Chart: Report Types Distribution
             pie_fig = go.Figure(data=[go.Pie(
-                labels=list(type_counts.keys()),
-                values=list(type_counts.values()),
+                labels=type_counts.index,
+                values=type_counts.values,
                 hole=.3,
                 marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'])
             )])
             
-            total_reports = sum(type_counts.values())
+            total_reports = len(df)
             pie_fig.update_layout(
                 title="Report Types - Distribution",
                 showlegend=True,
@@ -387,17 +435,65 @@ def view_reports():
             
             st.plotly_chart(pie_fig, use_container_width=True)
 
-        # Data Table
+        # Data Table Section
         st.subheader("Detailed Reports")
-        df = pd.DataFrame([{
-            'Date': report.get('date', 'N/A'),
-            'Officer': report.get('officer_name', 'N/A'),
-            'Type': report.get('type', 'Daily'),
-            'Company': report.get('company_name', 'N/A'),
-            'Tasks': str(report.get('tasks', 'N/A'))[:100] + '...' if len(str(report.get('tasks', 'N/A'))) > 100 else str(report.get('tasks', 'N/A'))
-        } for report in report_list])
         
-        st.dataframe(df, use_container_width=True)
+        # Prepare DataFrame for display
+        display_df = pd.DataFrame([{
+            'Date': report.get('date'),
+            'Officer': report.get('officer_name', 'N/A'),
+            'Type': report.get('type', 'N/A'),
+            'Company': report.get('company_name', 'N/A'),
+            'Tasks': str(report.get('tasks', 'N/A'))[:100] + '...' if len(str(report.get('tasks', 'N/A'))) > 100 else str(report.get('tasks', 'N/A')),
+            'Challenges': str(report.get('challenges', 'N/A'))[:100] + '...' if len(str(report.get('challenges', 'N/A'))) > 100 else str(report.get('challenges', 'N/A')),
+            'Solutions': str(report.get('solutions', 'N/A'))[:100] + '...' if len(str(report.get('solutions', 'N/A'))) > 100 else str(report.get('solutions', 'N/A'))
+        } for report in all_reports])
+        
+        # Convert date to datetime for sorting
+        display_df['Date'] = pd.to_datetime(display_df['Date'])
+        
+        # Sort based on user selection
+        display_df = display_df.sort_values('Date', ascending=(sort_order == "Oldest First"))
+        
+        # Convert date back to string format for display
+        display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
+        
+        # Display the DataFrame with improved formatting
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            column_config={
+                "Date": st.column_config.TextColumn(
+                    "Date",
+                    width="medium",
+                ),
+                "Officer": st.column_config.TextColumn(
+                    "Officer",
+                    width="medium",
+                ),
+                "Type": st.column_config.TextColumn(
+                    "Type",
+                    width="small",
+                ),
+                "Company": st.column_config.TextColumn(
+                    "Company",
+                    width="medium",
+                ),
+                "Tasks": st.column_config.TextColumn(
+                    "Tasks",
+                    width="large",
+                ),
+                "Challenges": st.column_config.TextColumn(
+                    "Challenges",
+                    width="large",
+                ),
+                "Solutions": st.column_config.TextColumn(
+                    "Solutions",
+                    width="large",
+                )
+            },
+            hide_index=True
+        )
 
     else:
         st.info("No reports found for the selected criteria.")
@@ -406,543 +502,368 @@ def manage_folders():
     """Create and manage folders with enhanced visual interface"""
     st.header("Manage Folders")
     
-    # Custom CSS for better spacing only
-    st.markdown("""
-        <style>
-            /* Container spacing */
-            .block-container {
-                padding: 2rem 1rem !important;
-            }
-            
-            /* Table spacing */
-            .stDataFrame {
-                width: 100% !important;
-            }
-            
-            /* File list spacing */
-            [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > div {
-                margin-bottom: 1.5rem;
-            }
-            
-            /* Button spacing */
-            .stButton > button {
-                margin: 0.5rem 0;
-                width: 100%;
-            }
-            
-            /* Selectbox spacing */
-            .stSelectbox {
-                margin: 1rem 0;
-            }
-            
-            /* Section spacing */
-            .section-spacing {
-                margin: 2rem 0;
-                padding: 1rem;
-            }
-            
-            /* Grid layout spacing */
-            .row-widget {
-                margin: 1rem 0;
-            }
-            
-            /* Column spacing */
-            [data-testid="column"] {
-                padding: 0 0.5rem;
-            }
-            
-            /* Header spacing */
-            h1, h2, h3, h4, h5 {
-                margin: 1.5rem 0 1rem 0;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    # Define system folders to exclude
+    SYSTEM_FOLDERS = {'Summaries', 'Archive', 'Attachments', 'Templates', '__pycache__'}
     
-    # Display existing folders
-    st.subheader("Existing Folders")
-    all_folders = [d for d in os.listdir(REPORTS_DIR) 
-                  if os.path.isdir(os.path.join(REPORTS_DIR, d))]
+    # Get filtered list of officer folders
+    officer_folders = [
+        d for d in os.listdir(REPORTS_DIR) 
+        if os.path.isdir(os.path.join(REPORTS_DIR, d)) 
+        and d not in SYSTEM_FOLDERS
+        and not d.startswith('.')
+        and not d.startswith('__')
+    ]
     
-    if all_folders:
-        # Create tabs for different views
-        tab1, tab2 = st.tabs(["📂 Folder View", "📊 Folder Statistics"])
+    # Folder selection
+    selected_folder = st.selectbox("Select folder to view/manage:", officer_folders)
+    
+    if selected_folder:
+        folder_path = os.path.join(REPORTS_DIR, selected_folder)
+        reports_path = os.path.join(folder_path, 'reports')
         
-        with tab1:
-            # Enhanced folder selection with metrics
-            selected_folder = st.selectbox("Select folder to view/manage:", all_folders)
+        # Action buttons in a row
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("✏️ Rename Folder", use_container_width=True):
+                st.session_state.show_rename = True
+        with col2:
+            if st.button("🗑️ Delete Folder", use_container_width=True):
+                st.session_state.confirm_delete = True
+        with col3:
+            if st.button("ℹ️ Folder Info", use_container_width=True):
+                st.session_state.show_info = True
+        
+        # Display folder contents with enhanced visuals
+        st.markdown("### 📂 Folder Contents")
+        
+        # Check both main folder and reports subfolder for JSON files
+        contents = []
+        if os.path.exists(folder_path):
+            contents.extend([f for f in os.listdir(folder_path) if f.endswith('.json')])
+        if os.path.exists(reports_path):
+            contents.extend([f for f in os.listdir(reports_path) if f.endswith('.json')])
+        
+        # Display files in a table with actions
+        if contents:
+            st.markdown("#### 📄 Files")
+            file_data = []
+            for file in contents:
+                try:
+                    # Try main folder first, then reports subfolder
+                    file_path = os.path.join(folder_path, file)
+                    if not os.path.exists(file_path):
+                        file_path = os.path.join(reports_path, file)
+                    
+                    file_size = os.path.getsize(file_path)
+                    file_date = datetime.fromtimestamp(os.path.getmtime(file_path))
+                    file_data.append({
+                        "Name": file,
+                        "Size": f"{file_size/1024:.1f} KB",
+                        "Modified": file_date.strftime("%Y-%m-%d %H:%M"),
+                        "Actions": file
+                    })
+                except Exception as e:
+                    st.error(f"Error processing file {file}: {str(e)}")
+                    continue
             
-            if selected_folder:
-                folder_path = os.path.join(REPORTS_DIR, selected_folder)
+            if file_data:
+                df = pd.DataFrame(file_data)
+                st.dataframe(
+                    df,
+                    column_config={
+                        "Actions": st.column_config.Column(
+                            "Actions",
+                            width="medium",
+                            help="Available actions for the file"
+                        )
+                    },
+                    hide_index=True
+                )
                 
-                # Folder actions in a container
-                with st.container():
+                # File actions
+                selected_file = st.selectbox("Select file for actions:", contents)
+                if selected_file:
                     col1, col2, col3 = st.columns(3)
                     
+                    # Determine the correct file path for the selected file
+                    selected_file_path = os.path.join(folder_path, selected_file)
+                    if not os.path.exists(selected_file_path):
+                        selected_file_path = os.path.join(reports_path, selected_file)
+                    
                     with col1:
-                        if st.button("✏️ Rename Folder", use_container_width=True):
-                            st.session_state.show_rename = True
+                        if st.button("👁️ View", use_container_width=True):
+                            try:
+                                with open(selected_file_path, 'r') as f:
+                                    content = json.load(f)
+                            except Exception as e:
+                                st.error(f"Error reading file: {str(e)}")
+                                return
+                                
+                            # Custom CSS focusing on the top grid items
+                            st.markdown("""
+                                <style>
+                                    /* Top grid layout control */
+                                    .report-grid {
+                                        display: grid;
+                                        grid-template-columns: repeat(3, minmax(250px, 1fr));
+                                        gap: 1.5rem;
+                                        margin: 1.5rem 0;
+                                        width: 100%;
+                                    }
+                                    
+                                    .grid-item {
+                                        background-color: #2d2d2d;
+                                        padding: 1.5rem;
+                                        border-radius: 8px;
+                                        text-align: center;
+                                        border: 1px solid #3d3d3d;
+                                        min-width: 250px;
+                                    }
+                                    
+                                    .grid-item h4 {
+                                        color: #9e9e9e;
+                                        margin-bottom: 0.75rem;
+                                        font-size: 0.9rem;
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                    }
+                                    
+                                    .grid-item p {
+                                        color: #ffffff;
+                                        font-size: 1.1rem;
+                                        margin: 0;
+                                        font-weight: 500;
+                                    }
+                                    
+                                    /* Company section styling */
+                                    .company-grid {
+                                        display: grid;
+                                        grid-template-columns: 1fr;
+                                        margin: 1.5rem 0;
+                                        width: 100%;
+                                    }
+                                    
+                                    .company-item {
+                                        background-color: #2d2d2d;
+                                        padding: 1.5rem;
+                                        border-radius: 8px;
+                                        border: 1px solid #3d3d3d;
+                                        min-width: 350px;
+                                    }
+                                    
+                                    .company-item h4 {
+                                        color: #9e9e9e;
+                                        margin-bottom: 1rem;
+                                        font-size: 1rem;
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.05em;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 0.5rem;
+                                    }
+                                    
+                                    .company-content {
+                                        background-color: #363636;
+                                        padding: 1.25rem;
+                                        border-radius: 6px;
+                                        color: #ffffff;
+                                        font-size: 1.1rem;
+                                        font-weight: 500;
+                                    }
+                                </style>
+                            """, unsafe_allow_html=True)
                             
-                    with col2:
-                        if st.button("🗑️ Delete Folder", use_container_width=True):
-                            if st.session_state.get('confirm_delete', False):
-                                try:
-                                    import shutil
-                                    shutil.rmtree(folder_path)
-                                    st.success(f"Folder '{selected_folder}' deleted successfully!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error deleting folder: {str(e)}")
-                            else:
-                                st.session_state.confirm_delete = True
-                                st.warning(f"Are you sure you want to delete '{selected_folder}'? Click delete again to confirm.")
-                    
-                    with col3:
-                        # Add folder info button
-                        if st.button("ℹ️ Folder Info", use_container_width=True):
-                            st.session_state.show_info = True
-                
-                # Rename folder interface
-                if st.session_state.get('show_rename', False):
-                    with st.expander("Rename Folder", expanded=True):
-                        new_name = st.text_input("Enter new folder name:", selected_folder)
-                        if st.button("✅ Confirm Rename"):
-                            if new_name and new_name != selected_folder:
-                                try:
-                                    new_path = os.path.join(REPORTS_DIR, new_name)
-                                    if os.path.exists(new_path):
-                                        st.warning(f"Folder '{new_name}' already exists!")
-                                    else:
-                                        os.rename(folder_path, new_path)
-                                        st.success(f"Folder renamed to '{new_name}' successfully!")
-                                        st.session_state.show_rename = False
-                                        st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error renaming folder: {str(e)}")
-                
-                # Folder info display
-                if st.session_state.get('show_info', False):
-                    with st.expander("Folder Information", expanded=True):
-                        contents = os.listdir(folder_path)
-                        total_size = sum(os.path.getsize(os.path.join(folder_path, f)) 
-                                       for f in contents if os.path.isfile(os.path.join(folder_path, f)))
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Total Items", len(contents))
-                        with col2:
-                            st.metric("Size", f"{total_size/1024:.1f} KB")
-                        with col3:
-                            st.metric("Last Modified", 
-                                    datetime.fromtimestamp(os.path.getmtime(folder_path))
-                                    .strftime("%Y-%m-%d"))
-                
-                # Display folder contents with enhanced visuals
-                st.markdown("### 📂 Folder Contents")
-                contents = os.listdir(folder_path)
-                
-                # Separate files and folders
-                subfolders = [item for item in contents if os.path.isdir(os.path.join(folder_path, item))]
-                files = [item for item in contents if os.path.isfile(os.path.join(folder_path, item))]
-                
-                # Display subfolders in a grid
-                if subfolders:
-                    st.markdown("#### 📁 Subfolders")
-                    cols = st.columns(3)
-                    for idx, subfolder in enumerate(subfolders):
-                        with cols[idx % 3]:
-                            with st.container():
-                                st.markdown(f"**{subfolder}**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    if st.button("🗑️", key=f"del_{subfolder}", help="Delete subfolder"):
-                                        try:
-                                            import shutil
-                                            shutil.rmtree(os.path.join(folder_path, subfolder))
-                                            st.success(f"Subfolder '{subfolder}' deleted!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Error deleting subfolder: {str(e)}")
-                                with col2:
-                                    if st.button("📊", key=f"info_{subfolder}", help="Subfolder info"):
-                                        subfolder_path = os.path.join(folder_path, subfolder)
-                                        subfolder_contents = os.listdir(subfolder_path)
-                                        st.info(f"Items: {len(subfolder_contents)}")
-                
-                # Display files in a table with actions
-                if files:
-                    st.markdown("#### 📄 Files")
-                    file_data = []
-                    for file in files:
-                        file_path = os.path.join(folder_path, file)
-                        file_size = os.path.getsize(file_path)
-                        file_date = datetime.fromtimestamp(os.path.getmtime(file_path))
-                        file_data.append({
-                            "Name": file,
-                            "Size": f"{file_size/1024:.1f} KB",
-                            "Modified": file_date.strftime("%Y-%m-%d %H:%M"),
-                            "Actions": file
-                        })
-                    
-                    df = pd.DataFrame(file_data)
-                    st.dataframe(
-                        df,
-                        column_config={
-                            "Actions": st.column_config.Column(
-                                "Actions",
-                                width="medium",
-                                help="Available actions for the file"
-                            )
-                        },
-                        hide_index=True
-                    )
-                    
-                    # File actions
-                    selected_file = st.selectbox("Select file for actions:", files)
-                    if selected_file:
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            if st.button("👁️ View", use_container_width=True):
-                                file_path = os.path.join(folder_path, selected_file)
-                                try:
-                                    with open(file_path, 'r') as f:
-                                        content = json.load(f)
-                                    
-                                    # Custom CSS focusing on the top grid items
-                                    st.markdown("""
-                                        <style>
-                                            /* Top grid layout control */
-                                            .report-grid {
-                                                display: grid;
-                                                grid-template-columns: repeat(3, minmax(250px, 1fr));
-                                                gap: 1.5rem;
-                                                margin: 1.5rem 0;
-                                                width: 100%;
-                                            }
-                                            
-                                            .grid-item {
-                                                background-color: #2d2d2d;
-                                                padding: 1.5rem;
-                                                border-radius: 8px;
-                                                text-align: center;
-                                                border: 1px solid #3d3d3d;
-                                                min-width: 250px;  /* Minimum width for each item */
-                                            }
-                                            
-                                            .grid-item h4 {
-                                                color: #9e9e9e;
-                                                margin-bottom: 0.75rem;
-                                                font-size: 0.9rem;
-                                                text-transform: uppercase;
-                                                letter-spacing: 0.05em;
-                                            }
-                                            
-                                            .grid-item p {
-                                                color: #ffffff;
-                                                font-size: 1.1rem;
-                                                margin: 0;
-                                                font-weight: 500;
-                                            }
-                                            
-                                            /* Container adjustments for the grid */
-                                            [data-testid="stHorizontalBlock"] {
-                                                gap: 1.5rem !important;
-                                                padding: 0 1rem !important;
-                                            }
-                                        </style>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # Report Header Grid with expanded width
-                                    st.markdown("""
-                                        <div class="report-grid">
-                                            <div class="grid-item">
-                                                <h4>Report Type</h4>
-                                                <p>{}</p>
-                                            </div>
-                                            <div class="grid-item">
-                                                <h4>Date</h4>
-                                                <p>{}</p>
-                                            </div>
-                                            <div class="grid-item">
-                                                <h4>Officer</h4>
-                                                <p>{}</p>
-                                            </div>
+                            # Report Header Grid
+                            st.markdown("""
+                                <div class="report-grid">
+                                    <div class="grid-item">
+                                        <h4>Report Type</h4>
+                                        <p>{}</p>
+                                    </div>
+                                    <div class="grid-item">
+                                        <h4>Date</h4>
+                                        <p>{}</p>
+                                    </div>
+                                    <div class="grid-item">
+                                        <h4>Officer</h4>
+                                        <p>{}</p>
+                                    </div>
+                                </div>
+                            """.format(
+                                content.get('type', 'N/A'),
+                                content.get('date', 'N/A'),
+                                content.get('officer_name', 'N/A')
+                            ), unsafe_allow_html=True)
+                            
+                            # Company section
+                            st.markdown("""
+                                <div class="company-grid">
+                                    <div class="company-item">
+                                        <h4>🏢 Company</h4>
+                                        <div class="company-content">
+                                            {}
                                         </div>
-                                    """.format(
+                                    </div>
+                                </div>
+                            """.format(content.get('company_name', 'N/A')), unsafe_allow_html=True)
+                            
+                            # Tasks Section
+                            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+                            st.markdown("##### TASKS")
+                            tasks = content.get('tasks', '').split('\n')
+                            for task in tasks:
+                                if task.strip():
+                                    st.markdown(f"""
+                                        <div style='background-color: #363636; padding: 0.75rem; 
+                                                  border-radius: 6px; margin: 0.5rem 0;'>
+                                            ✓ {task.strip()}
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Challenges Section
+                            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+                            st.markdown("##### CHALLENGES")
+                            challenges = content.get('challenges', '').split('\n')
+                            for challenge in challenges:
+                                if challenge.strip():
+                                    st.markdown(f"""
+                                        <div style='background-color: #363636; padding: 0.75rem; 
+                                                  border-radius: 6px; margin: 0.5rem 0;'>
+                                            ⚠️ {challenge.strip()}
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Solutions Section
+                            st.markdown('<div class="content-box">', unsafe_allow_html=True)
+                            st.markdown("##### SOLUTIONS")
+                            solutions = content.get('solutions', '').split('\n')
+                            for solution in solutions:
+                                if solution.strip():
+                                    st.markdown(f"""
+                                        <div style='background-color: #363636; padding: 0.75rem; 
+                                                  border-radius: 6px; margin: 0.5rem 0;'>
+                                            💡 {solution.strip()}
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Attachments Section
+                            if content.get('attachments'):
+                                st.markdown('<div class="content-box">', unsafe_allow_html=True)
+                                st.markdown("##### ATTACHMENTS")
+                                for attachment in content['attachments']:
+                                    st.markdown(f"""
+                                        <div style='background-color: #363636; padding: 0.75rem; 
+                                                  border-radius: 6px; margin: 0.5rem 0;'>
+                                            📎 {attachment}
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Excel download section
+                            try:
+                                # Create DataFrame for Excel
+                                excel_data = {
+                                    'Category': [
+                                        'Report Type',
+                                        'Date',
+                                        'Officer Name',
+                                        'Company Name',
+                                        '\nTasks',
+                                        '\nChallenges',
+                                        '\nSolutions'
+                                    ],
+                                    'Details': [
                                         content.get('type', 'N/A'),
                                         content.get('date', 'N/A'),
-                                        content.get('officer_name', 'N/A')
-                                    ), unsafe_allow_html=True)
+                                        content.get('officer_name', 'N/A'),
+                                        content.get('company_name', 'N/A'),
+                                        '\n' + content.get('tasks', 'N/A'),
+                                        '\n' + content.get('challenges', 'N/A'),
+                                        '\n' + content.get('solutions', 'N/A')
+                                    ]
+                                }
+                                
+                                df = pd.DataFrame(excel_data)
+                                
+                                # Create Excel buffer
+                                buffer = BytesIO()
+                                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                                    df.to_excel(writer, sheet_name='Report', index=False)
                                     
-                                    # Add CSS for company section
-                                    st.markdown("""
-                                        <style>
-                                            /* Company section styling */
-                                            .company-grid {
-                                                display: grid;
-                                                grid-template-columns: 1fr;
-                                                margin: 1.5rem 0;
-                                                width: 100%;
-                                            }
-                                            
-                                            .company-item {
-                                                background-color: #2d2d2d;
-                                                padding: 1.5rem;
-                                                border-radius: 8px;
-                                                border: 1px solid #3d3d3d;
-                                                min-width: 350px;
-                                            }
-                                            
-                                            .company-item h4 {
-                                                color: #9e9e9e;
-                                                margin-bottom: 1rem;
-                                                font-size: 1rem;
-                                                text-transform: uppercase;
-                                                letter-spacing: 0.05em;
-                                                display: flex;
-                                                align-items: center;
-                                                gap: 0.5rem;
-                                            }
-                                            
-                                            .company-content {
-                                                background-color: #363636;
-                                                padding: 1.25rem;
-                                                border-radius: 6px;
-                                                color: #ffffff;
-                                                font-size: 1.1rem;
-                                                font-weight: 500;
-                                            }
-                                        </style>
-                                    """, unsafe_allow_html=True)
+                                    # Get workbook and worksheet objects
+                                    workbook = writer.book
+                                    worksheet = writer.sheets['Report']
                                     
-                                    # Update the Company section with new styling
-                                    st.markdown("""
-                                        <div class="company-grid">
-                                            <div class="company-item">
-                                                <h4>🏢 Company</h4>
-                                                <div class="company-content">
-                                                    {}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    """.format(content.get('company_name', 'N/A')), unsafe_allow_html=True)
+                                    # Define formats
+                                    header_format = workbook.add_format({
+                                        'bold': True,
+                                        'font_size': 12,
+                                        'bg_color': '#4B5563',
+                                        'font_color': 'white',
+                                        'border': 1
+                                    })
                                     
-                                    # Tasks Section
-                                    st.markdown('<div class="content-box">', unsafe_allow_html=True)
-                                    st.markdown("##### TASKS")
-                                    tasks = content.get('tasks', '').split('\n')
-                                    for task in tasks:
-                                        if task.strip():
-                                            st.markdown(f"""
-                                                <div style='background-color: #363636; padding: 0.75rem; 
-                                                          border-radius: 6px; margin: 0.5rem 0;'>
-                                                    ✓ {task.strip()}
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                    st.markdown('</div>', unsafe_allow_html=True)
+                                    cell_format = workbook.add_format({
+                                        'font_size': 11,
+                                        'text_wrap': True,
+                                        'valign': 'top',
+                                        'border': 1
+                                    })
                                     
-                                    # Add these CSS rules for Challenges and Solutions grid
-                                    st.markdown("""
-                                        <style>
-                                            /* Challenges and Solutions grid */
-                                            .challenge-solution-grid {
-                                                display: grid;
-                                                grid-template-columns: repeat(2, minmax(350px, 1fr));
-                                                gap: 1.5rem;
-                                                margin: 1.5rem 0;
-                                                width: 100%;
-                                            }
-                                            
-                                            .challenge-solution-item {
-                                                background-color: #2d2d2d;
-                                                padding: 1.5rem;
-                                                border-radius: 8px;
-                                                border: 1px solid #3d3d3d;
-                                                min-width: 350px;
-                                            }
-                                            
-                                            .challenge-solution-item h4 {
-                                                color: #9e9e9e;
-                                                margin-bottom: 1rem;
-                                                font-size: 1rem;
-                                                text-transform: uppercase;
-                                                letter-spacing: 0.05em;
-                                                display: flex;
-                                                align-items: center;
-                                                gap: 0.5rem;
-                                            }
-                                            
-                                            .challenge-solution-content {
-                                                background-color: #363636;
-                                                padding: 1.25rem;
-                                                border-radius: 6px;
-                                                color: #ffffff;
-                                                font-size: 1rem;
-                                                line-height: 1.5;
-                                                min-height: 100px;
-                                            }
-                                        </style>
-                                    """, unsafe_allow_html=True)
+                                    # Apply formats
+                                    worksheet.set_column('A:A', 20)  # Width of Category column
+                                    worksheet.set_column('B:B', 60)  # Width of Details column
                                     
-                                    # Update the Challenges and Solutions section
-                                    st.markdown("""
-                                        <div class="challenge-solution-grid">
-                                            <div class="challenge-solution-item">
-                                                <h4>⚠️ Challenges</h4>
-                                                <div class="challenge-solution-content">
-                                                    {}
-                                                </div>
-                                            </div>
-                                            <div class="challenge-solution-item">
-                                                <h4>💡 Solutions</h4>
-                                                <div class="challenge-solution-content">
-                                                    {}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    """.format(
-                                        content.get('challenges', 'No challenges recorded'),
-                                        content.get('solutions', 'No solutions recorded')
-                                    ), unsafe_allow_html=True)
+                                    # Apply header format
+                                    for col_num, value in enumerate(df.columns.values):
+                                        worksheet.write(0, col_num, value, header_format)
                                     
-                                    # Attachments Section
-                                    if content.get('attachments'):
-                                        st.markdown('<div class="content-box">', unsafe_allow_html=True)
-                                        st.markdown("##### ATTACHMENTS")
-                                        for attachment in content['attachments']:
-                                            st.markdown(f"""
-                                                <div style='background-color: #363636; padding: 0.75rem; 
-                                                          border-radius: 6px; margin: 0.5rem 0;'>
-                                                    📎 {attachment}
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                        st.markdown('</div>', unsafe_allow_html=True)
-                                    
-                                    # Download Button
-                                    st.markdown("<div style='margin-top: 2rem;'>", unsafe_allow_html=True)
-                                    st.download_button(
-                                        label="📥 Download Report",
-                                        data=json.dumps(content, indent=4),
-                                        file_name=selected_file,
-                                        mime="application/json",
-                                        use_container_width=True
-                                    )
-                                    st.markdown("</div>", unsafe_allow_html=True)
-                                    
-                                except json.JSONDecodeError:
-                                    with open(file_path, 'r') as f:
-                                        content = f.read()
-                                    st.markdown('<div class="content-box">', unsafe_allow_html=True)
-                                    st.markdown("##### FILE CONTENT")
-                                    st.text_area("", value=content, height=300, disabled=True)
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                                except Exception as e:
-                                    st.error(f"Error reading file: {str(e)}")
-                        with col2:
-                            if st.button("🗑️ Delete", use_container_width=True):
-                                try:
-                                    os.remove(os.path.join(folder_path, selected_file))
-                                    st.success(f"File '{selected_file}' deleted!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error deleting file: {str(e)}")
-                        with col3:
-                            if st.button("📥 Download", use_container_width=True):
-                                file_path = os.path.join(folder_path, selected_file)
-                                with open(file_path, 'rb') as f:
+                                    # Apply cell format to all data cells
+                                    for row in range(1, len(df) + 1):
+                                        worksheet.set_row(row, 45)  # Set row height
+                                        worksheet.write(row, 0, df.iloc[row-1, 0], cell_format)
+                                        worksheet.write(row, 1, df.iloc[row-1, 1], cell_format)
+                                
+                                st.markdown("<div style='margin-top: 2rem;'>", unsafe_allow_html=True)
+                                st.download_button(
+                                    label="📥 Download Report as Excel",
+                                    data=buffer.getvalue(),
+                                    file_name=f"{content.get('date', 'report')}_{content.get('officer_name', 'unknown')}.xlsx",
+                                    mime="application/vnd.ms-excel",
+                                    use_container_width=True
+                                )
+                                st.markdown("</div>", unsafe_allow_html=True)
+                                
+                            except Exception as e:
+                                st.error(f"Error preparing Excel download: {str(e)}")
+                    
+                    with col2:
+                        if st.button("🗑️ Delete", use_container_width=True):
+                            try:
+                                os.remove(selected_file_path)
+                                st.success(f"File '{selected_file}' deleted!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error deleting file: {str(e)}")
+                    
+                    with col3:
+                        if st.button("📥 Download", use_container_width=True):
+                            try:
+                                with open(selected_file_path, 'rb') as f:
                                     st.download_button(
                                         label="Confirm Download",
                                         data=f.read(),
                                         file_name=selected_file,
                                         mime="application/octet-stream"
                                     )
-                
-                if not contents:
-                    st.info("This folder is empty")
-                
-                # Create subfolder interface
-                with st.expander("Create New Subfolder"):
-                    subfolder_name = st.text_input(f"Enter subfolder name for '{selected_folder}':")
-                    if st.button("📁 Create Subfolder"):
-                        if subfolder_name:
-                            try:
-                                subfolder_path = os.path.join(folder_path, subfolder_name)
-                                if os.path.exists(subfolder_path):
-                                    st.warning(f"Subfolder '{subfolder_name}' already exists!")
-                                else:
-                                    os.makedirs(subfolder_path)
-                                    st.success(f"Subfolder '{subfolder_name}' created successfully!")
-                                    st.rerun()
                             except Exception as e:
-                                st.error(f"Error creating subfolder: {str(e)}")
-                        else:
-                            st.warning("Please enter a subfolder name.")
+                                st.error(f"Error preparing download: {str(e)}")
         
-        with tab2:
-            # Folder statistics and visualizations
-            st.subheader("Folder Statistics")
-            folder_sizes = {}
-            folder_items = {}
-            
-            for folder in all_folders:
-                folder_path = os.path.join(REPORTS_DIR, folder)
-                contents = os.listdir(folder_path)
-                size = sum(os.path.getsize(os.path.join(folder_path, f)) 
-                          for f in contents if os.path.isfile(os.path.join(folder_path, f)))
-                folder_sizes[folder] = size/1024  # Convert to KB
-                folder_items[folder] = len(contents)
-            
-            # Display folder size distribution
-            fig_sizes = {
-                'data': [{
-                    'type': 'pie',
-                    'labels': list(folder_sizes.keys()),
-                    'values': list(folder_sizes.values()),
-                    'hole': 0.4,
-                }],
-                'layout': {
-                    'title': 'Folder Size Distribution (KB)',
-                    'height': 400
-                }
-            }
-            st.plotly_chart(fig_sizes, use_container_width=True)
-            
-            # Display items per folder
-            fig_items = {
-                'data': [{
-                    'type': 'bar',
-                    'x': list(folder_items.keys()),
-                    'y': list(folder_items.values()),
-                    'marker': {'color': 'lightblue'},
-                }],
-                'layout': {
-                    'title': 'Items per Folder',
-                    'height': 400,
-                    'xaxis': {'tickangle': 45}
-                }
-            }
-            st.plotly_chart(fig_items, use_container_width=True)
-    
-    else:
-        st.info("No folders created yet.")
-    
-    # Create new main folder interface
-    with st.expander("Create New Main Folder"):
-        st.write("### Create New Main Folder")
-        new_folder = st.text_input("Enter folder name:")
-        if st.button("📁 Create Folder"):
-            if new_folder:
-                try:
-                    folder_path = os.path.join(REPORTS_DIR, new_folder)
-                    if os.path.exists(folder_path):
-                        st.warning(f"Folder '{new_folder}' already exists!")
-                    else:
-                        os.makedirs(folder_path)
-                        st.success(f"Folder '{new_folder}' created successfully!")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Error creating folder: {str(e)}")
-            else:
-                st.warning("Please enter a folder name.")
+        if not contents:
+            st.info("This folder is empty")
 
 def show_summaries():
     """Show summaries with proper folder filtering"""
@@ -951,36 +872,31 @@ def show_summaries():
     # Define system folders to exclude
     SYSTEM_FOLDERS = {'Summaries', 'Archive', 'Attachments', 'Templates', '__pycache__'}
     
-    # Filter controls with cleaned officer list
+    # Get filtered list of officer folders
+    officer_folders = [
+        d for d in os.listdir(REPORTS_DIR) 
+        if os.path.isdir(os.path.join(REPORTS_DIR, d)) 
+        and d not in SYSTEM_FOLDERS
+        and not d.startswith('.')
+        and not d.startswith('__')
+    ]
+    
+    # Filter controls
     col1, col2, col3 = st.columns([2, 1, 1])
+    
     with col1:
-        # Get only officer folders (excluding system folders)
-        officer_folders = [
-            d for d in os.listdir(REPORTS_DIR) 
-            if os.path.isdir(os.path.join(REPORTS_DIR, d)) 
-            and d not in SYSTEM_FOLDERS
-            and not d.startswith('.')  # Exclude hidden folders
-            and not d.startswith('__')  # Exclude python special folders
-        ]
-        
         selected_officer = st.selectbox(
             "Select Officer",
             ["All Officers"] + sorted(officer_folders)
         )
     
     with col2:
-        report_type = st.selectbox(
-            "Report Type",
-            ["All Types", "Daily", "Weekly", "Monthly", "Special"]
-        )
-    
-    with col3:
         time_range = st.selectbox(
             "Time Range",
             ["Last 7 Days", "Last 30 Days", "Last 90 Days", "All Time"]
         )
     
-    # Date calculation based on time range
+    # Calculate date range based on selection
     end_date = datetime.now().date()
     if time_range == "Last 7 Days":
         start_date = end_date - timedelta(days=7)
@@ -989,245 +905,139 @@ def show_summaries():
     elif time_range == "Last 90 Days":
         start_date = end_date - timedelta(days=90)
     else:
-        start_date = datetime.min.date()
-    
-    # Collect reports with proper folder filtering
-    all_reports = []
-    officers_to_check = [selected_officer] if selected_officer != "All Officers" else officer_folders
-    
-    for officer in officers_to_check:
-        officer_path = os.path.join(REPORTS_DIR, officer)
-        if os.path.isdir(officer_path) and officer not in SYSTEM_FOLDERS:
-            for report_file in os.listdir(officer_path):
-                if report_file.endswith('.json'):
-                    try:
-                        with open(os.path.join(officer_path, report_file), 'r') as f:
-                            report_data = json.load(f)
-                            
-                            # Handle date from report or filename
-                            if 'date' not in report_data:
-                                date_str = report_file.split('_')[0]
-                                try:
-                                    report_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                                    report_data['date'] = date_str
-                                except ValueError:
-                                    file_path = os.path.join(officer_path, report_file)
-                                    mod_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-                                    report_data['date'] = mod_time.strftime('%Y-%m-%d')
-                            
-                            report_data['officer_name'] = officer
-                            
-                            # Apply filters
-                            report_date = datetime.strptime(report_data['date'], '%Y-%m-%d').date()
-                            if start_date <= report_date <= end_date:
-                                if report_type == "All Types" or report_data.get('type', 'Daily') == report_type:
-                                    all_reports.append(report_data)
-                                    
-                    except Exception as e:
-                        st.warning(f"Error reading report {report_file}: {str(e)}")
-                        continue
-    
-    if all_reports:
-        # Summary Statistics
+        start_date = None
+        end_date = None
+
+    # Generate summary
+    summary = generate_summary(
+        start_date=start_date.strftime('%Y-%m-%d') if start_date else None,
+        end_date=end_date.strftime('%Y-%m-%d') if end_date else None,
+        officer_name=selected_officer if selected_officer != "All Officers" else None
+    )
+
+    if summary:
+        # Display summary statistics
         st.subheader("Summary Statistics")
-        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        col1, col2, col3, col4 = st.columns(4)
         
-        with stat_col1:
-            st.metric("Total Reports", len(all_reports))
-        with stat_col2:
-            companies = len(set(report.get('company_name', '') for report in all_reports))
-            st.metric("Companies Covered", companies)
-        with stat_col3:
-            officers = len(set(report.get('officer_name', '') for report in all_reports))
-            st.metric("Active Officers", officers)
-        with stat_col4:
-            avg_tasks = sum(len(str(report.get('tasks', '')).split('\n')) for report in all_reports) / len(all_reports)
-            st.metric("Avg Tasks per Report", f"{avg_tasks:.1f}")
-        
-        # Report Type Distribution with both Bar and Pie charts
-        st.subheader("Report Distribution")
-        
-        # Calculate type counts
-        type_counts = {
-            'Daily': 0,
-            'Weekly': 0,
-            'Monthly': 0,
-            'Special': 0
-        }
-        for report in all_reports:
-            report_type = report.get('type', 'Daily')
-            if report_type in type_counts:
-                type_counts[report_type] += 1
-        
-        # Create two columns for charts
+        with col1:
+            st.metric("Total Reports", summary['total_reports'])
+        with col2:
+            st.metric("Active Officers", summary['officers'])
+        with col3:
+            st.metric("Companies Covered", summary['companies'])
+        with col4:
+            st.metric("Report Types", len(summary['report_types']))
+
+        # Charts Section
+        st.subheader("Report Analysis")
         chart_col1, chart_col2 = st.columns(2)
-        
+
         with chart_col1:
-            # Bar Chart
-            bar_fig = go.Figure(data=[go.Bar(
-                x=list(type_counts.keys()),
-                y=list(type_counts.values()),
-                marker_color=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']
+            # Report Types Distribution
+            fig_types = go.Figure(data=[go.Pie(
+                labels=list(summary['report_types'].keys()),
+                values=list(summary['report_types'].values()),
+                hole=.3,
+                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'])
             )])
             
-            bar_fig.update_layout(
-                title="Report Types - Bar Chart",
-                xaxis_title="Report Type",
+            fig_types.update_layout(
+                title="Report Types Distribution",
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white'),
+                height=400
+            )
+            
+            st.plotly_chart(fig_types, use_container_width=True)
+
+        with chart_col2:
+            # Officer Activity
+            fig_officers = go.Figure(data=[go.Bar(
+                x=list(summary['officer_activity'].keys()),
+                y=list(summary['officer_activity'].values()),
+                marker_color='#4ECDC4'
+            )])
+            
+            fig_officers.update_layout(
+                title="Officer Activity",
+                xaxis_title="Officer",
                 yaxis_title="Number of Reports",
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='white'),
-                margin=dict(t=30, l=0, r=0, b=0),
                 height=400
             )
             
-            st.plotly_chart(bar_fig, use_container_width=True)
+            st.plotly_chart(fig_officers, use_container_width=True)
+
+        # Company Distribution
+        st.subheader("Company Distribution")
+        fig_companies = go.Figure(data=[go.Bar(
+            x=list(summary['company_distribution'].keys()),
+            y=list(summary['company_distribution'].values()),
+            marker_color='#FF6B6B'
+        )])
         
-        with chart_col2:
-            # Pie Chart
-            pie_fig = go.Figure(data=[go.Pie(
-                labels=list(type_counts.keys()),
-                values=list(type_counts.values()),
-                hole=.3,
-                marker=dict(colors=['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4']),
-            )])
+        fig_companies.update_layout(
+            xaxis_title="Company",
+            yaxis_title="Number of Reports",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white'),
+            height=300,
+            xaxis_tickangle=-45
+        )
+        
+        st.plotly_chart(fig_companies, use_container_width=True)
+
+        # Recent Reports Table
+        st.subheader("Recent Reports")
+        if summary['recent_reports']:
+            recent_df = pd.DataFrame(summary['recent_reports'])
+            # Reorder and format columns
+            display_cols = ['date', 'officer_name', 'type', 'company_name', 'tasks']
+            recent_df = recent_df[display_cols]
+            recent_df.columns = ['Date', 'Officer', 'Type', 'Company', 'Tasks']
             
-            total_reports = sum(type_counts.values())
-            pie_fig.update_layout(
-                title="Report Types - Distribution",
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                annotations=[dict(
-                    text=f'Total: {total_reports}',
-                    font=dict(size=16, color='white'),
-                    showarrow=False,
-                    x=0.5,
-                    y=0.5
-                )],
-                margin=dict(t=30, l=0, r=0, b=0),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white'),
-                height=400
-            )
-            
-            st.plotly_chart(pie_fig, use_container_width=True)
-        
-        # Data Table Section
-        st.subheader("Detailed Report Data")
-        
-        # Create DataFrame with all report data
-        df_data = []
-        for report in all_reports:
-            df_data.append({
-                'Date': report.get('date', 'N/A'),
-                'Officer': report.get('officer_name', 'N/A'),
-                'Type': report.get('type', 'Daily'),
-                'Company': report.get('company_name', 'N/A'),
-                'Tasks': str(report.get('tasks', 'N/A')),
-                'Challenges': str(report.get('challenges', 'N/A')),
-                'Solutions': str(report.get('solutions', 'N/A'))
-            })
-        
-        df = pd.DataFrame(df_data)
-        
-        # Display table with truncated text for viewing
-        display_df = df.copy()
-        for col in ['Tasks', 'Challenges', 'Solutions']:
-            display_df[col] = display_df[col].apply(
+            # Truncate long text in Tasks column
+            recent_df['Tasks'] = recent_df['Tasks'].apply(
                 lambda x: str(x)[:100] + '...' if len(str(x)) > 100 else str(x)
             )
-        
-        # Add table styling
-        st.markdown("""
-            <style>
-                .dataframe {
-                    width: 100% !important;
-                    background-color: #1e1e1e;
-                    color: #ffffff;
-                }
-                .dataframe th {
-                    background-color: #2d2d2d;
-                    color: #ffffff;
-                    padding: 12px 8px !important;
-                    border-bottom: 1px solid #3d3d3d !important;
-                }
-                .dataframe td {
-                    padding: 10px 8px !important;
-                    border-bottom: 1px solid #2d2d2d !important;
-                }
-                .dataframe tr:hover {
-                    background-color: #2d2d2d;
-                }
-                
-                /* Download button styling */
-                .stDownloadButton {
-                    margin: 1rem 0;
-                }
-                .stDownloadButton button {
-                    width: 100%;
-                    padding: 0.5rem !important;
-                }
-            </style>
-        """, unsafe_allow_html=True)
-        
-        # Display the table
-        st.dataframe(display_df, use_container_width=True)
-        
-        # Download buttons section after the table
-        if not df.empty:
-            st.markdown("### Download Options")
-            col1, col2 = st.columns(2)
             
-            # Function to convert dataframe to excel
-            def convert_df_to_excel():
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='Reports', index=False)
-                    # Auto-adjust columns' width
-                    worksheet = writer.sheets['Reports']
-                    for idx, col in enumerate(df.columns):
-                        series = df[col]
-                        max_len = max(
-                            series.astype(str).map(len).max(),
-                            len(str(series.name))
-                        ) + 1
-                        worksheet.set_column(idx, idx, max_len)
-                return output.getvalue()
-            
-            # Generate Excel file
-            excel_file = convert_df_to_excel()
-            
-            # Generate CSV file
-            csv_file = df.to_csv(index=False).encode('utf-8')
-            
-            # Download buttons
-            with col1:
-                st.download_button(
-                    label="📥 Download Excel",
-                    data=excel_file,
-                    file_name=f"officer_reports_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.ms-excel",
-                    use_container_width=True
-                )
-            
-            with col2:
-                st.download_button(
-                    label="📥 Download CSV",
-                    data=csv_file,
-                    file_name=f"officer_reports_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-        
-        if not all_reports:
-            st.info("No reports found for the selected criteria.")
+            st.dataframe(
+                recent_df,
+                use_container_width=True,
+                column_config={
+                    "Date": st.column_config.TextColumn(
+                        "Date",
+                        width="medium",
+                    ),
+                    "Officer": st.column_config.TextColumn(
+                        "Officer",
+                        width="medium",
+                    ),
+                    "Type": st.column_config.TextColumn(
+                        "Type",
+                        width="small",
+                    ),
+                    "Company": st.column_config.TextColumn(
+                        "Company",
+                        width="medium",
+                    ),
+                    "Tasks": st.column_config.TextColumn(
+                        "Tasks",
+                        width="large",
+                    )
+                },
+                hide_index=True
+            )
+        else:
+            st.info("No recent reports found.")
+
     else:
         st.info("No reports found for the selected criteria.")
 
@@ -1386,7 +1196,7 @@ def show_detailed_analysis():
     with search_col3:
         report_type_filter = st.selectbox(
             "Report Type",
-            ["All Types", "Daily", "Weekly", "Monthly", "Special"],
+            ["All Types"] + REPORT_TYPES,
             label_visibility="collapsed"
         )
 
@@ -1401,246 +1211,197 @@ def show_detailed_analysis():
             value=datetime.now().date(),
             max_value=datetime.now().date())
 
-    # Get all reports with error handling
+    # Load all reports using the load_reports function
     all_reports = []
-    for officer_folder in [d for d in os.listdir(REPORTS_DIR) if os.path.isdir(os.path.join(REPORTS_DIR, d))]:
-        officer_path = os.path.join(REPORTS_DIR, officer_folder)
-        for report_file in os.listdir(officer_path):
-            if report_file.endswith('.json'):
-                try:
-                    with open(os.path.join(officer_path, report_file), 'r') as f:
-                        report_data = json.load(f)
-                        
-                        # Extract date from filename if not in report data
-                        if 'date' not in report_data:
-                            # Assuming filename format: YYYY-MM-DD_type.json
-                            date_str = report_file.split('_')[0]
-                            try:
-                                report_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                                report_data['date'] = date_str
-                            except ValueError:
-                                # If filename doesn't contain valid date, use file modification time
-                                file_path = os.path.join(officer_path, report_file)
-                                mod_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-                                report_data['date'] = mod_time.strftime('%Y-%m-%d')
-                        
-                        report_data['officer_folder'] = officer_folder
-                        report_data['file_name'] = report_file
-                        
-                        # Convert date string to datetime for comparison
-                        try:
-                            report_date = datetime.strptime(report_data['date'], '%Y-%m-%d').date()
-                            if start_date <= report_date <= end_date:
-                                all_reports.append(report_data)
-                        except ValueError:
-                            # If date parsing fails, include the report anyway
-                            all_reports.append(report_data)
-                            
-                except Exception as e:
-                    st.warning(f"Error reading report {report_file}: {str(e)}")
-                    continue
+    try:
+        all_reports = load_reports()  # This will load all reports for all officers
+    except Exception as e:
+        st.error(f"Error loading reports: {str(e)}")
+        return
 
-    # Filter reports based on search and type
+    # Filter reports based on date range
     filtered_reports = []
     for report in all_reports:
-        include_report = True
-        
-        # Report type filter
-        if report_type_filter != "All Types":
-            report_type = report.get('type', '')
-            if isinstance(report_type, str) and report_type != report_type_filter:
-                include_report = False
-        
-        # Search filter
-        if search_query:
-            search_query = search_query.lower()
-            if search_type == "All":
-                if not any(search_query in str(value).lower() 
-                          for value in [report.get('officer_name', ''),
-                                      report.get('company_name', ''),
-                                      report.get('tasks', ''),
-                                      report.get('type', '')]):
-                    include_report = False
-            elif search_type == "Officer":
-                if search_query not in str(report.get('officer_name', '')).lower():
-                    include_report = False
-            elif search_type == "Company":
-                if search_query not in str(report.get('company_name', '')).lower():
-                    include_report = False
-            elif search_type == "Report Type":
-                if search_query not in str(report.get('type', '')).lower():
-                    include_report = False
-            elif search_type == "Content":
-                if search_query not in str(report.get('tasks', '')).lower():
-                    include_report = False
-        
-        if include_report:
-            filtered_reports.append(report)
+        try:
+            report_date = datetime.strptime(report['date'], '%Y-%m-%d').date()
+            if start_date <= report_date <= end_date:
+                # Apply report type filter
+                if report_type_filter == "All Types" or report['type'] == report_type_filter:
+                    # Apply search filter
+                    if search_query:
+                        search_query = search_query.lower()
+                        if search_type == "All":
+                            if any(search_query in str(value).lower() 
+                                  for value in [report.get('officer_name', ''),
+                                              report.get('company_name', ''),
+                                              report.get('tasks', ''),
+                                              report.get('type', '')]):
+                                filtered_reports.append(report)
+                        elif search_type == "Officer":
+                            if search_query in str(report.get('officer_name', '')).lower():
+                                filtered_reports.append(report)
+                        elif search_type == "Company":
+                            if search_query in str(report.get('company_name', '')).lower():
+                                filtered_reports.append(report)
+                        elif search_type == "Report Type":
+                            if search_query in str(report.get('type', '')).lower():
+                                filtered_reports.append(report)
+                        elif search_type == "Content":
+                            if search_query in str(report.get('tasks', '')).lower():
+                                filtered_reports.append(report)
+                    else:
+                        filtered_reports.append(report)
+        except (ValueError, KeyError) as e:
+            st.warning(f"Error processing report: {str(e)}")
+            continue
 
-    # Display results in the existing table format
+    # Display results
     if filtered_reports:
+        st.markdown(f"Found {len(filtered_reports)} reports")
+        
+        # Create DataFrame for display
         df_data = []
         for report in filtered_reports:
+            tasks_text = str(report.get('tasks', 'N/A'))
+            truncated_tasks = tasks_text[:100] + '...' if len(tasks_text) > 100 else tasks_text
+            
             df_data.append({
                 'Date': report.get('date', 'N/A'),
                 'Type': report.get('type', 'N/A'),
                 'Officer': report.get('officer_name', 'N/A'),
                 'Company': report.get('company_name', 'N/A'),
-                'Tasks': report.get('tasks', 'N/A')[:100] + '...' if len(str(report.get('tasks', 'N/A'))) > 100 else report.get('tasks', 'N/A')
+                'Tasks': truncated_tasks
             })
         
         df = pd.DataFrame(df_data)
         
-        # Keep your existing table styling
-        st.markdown(f"Found {len(filtered_reports)} reports")
-        st.dataframe(df, use_container_width=True)
+        # Sort DataFrame by date (newest first)
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.sort_values('Date', ascending=False)
+        
+        # Convert date back to string format for display
+        df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+        
+        # Display the DataFrame
+        st.dataframe(
+            df,
+            use_container_width=True,
+            column_config={
+                "Date": st.column_config.TextColumn(
+                    "Date",
+                    width="medium",
+                ),
+                "Type": st.column_config.TextColumn(
+                    "Type",
+                    width="small",
+                ),
+                "Officer": st.column_config.TextColumn(
+                    "Officer",
+                    width="medium",
+                ),
+                "Company": st.column_config.TextColumn(
+                    "Company",
+                    width="medium",
+                ),
+                "Tasks": st.column_config.TextColumn(
+                    "Tasks",
+                    width="large",
+                ),
+            },
+            hide_index=True,
+        )
     else:
         st.info("No reports found matching your search criteria.")
 
 def submit_report():
-    """Submit report with proper officer management"""
-    st.header("Submit Report")
+    """Submit a new report"""
+    st.header("Submit New Report")
     
-    # Define system folders to exclude
-    SYSTEM_FOLDERS = {'Summaries', 'Archive', 'Attachments', 'Templates', '__pycache__'}
-    
-    # Get existing officers
+    # Get list of existing officer folders
     officer_folders = [
         d for d in os.listdir(REPORTS_DIR) 
-        if os.path.isdir(os.path.join(REPORTS_DIR, d)) 
-        and d not in SYSTEM_FOLDERS
-        and not d.startswith('.')
-        and not d.startswith('__')
+        if os.path.isdir(os.path.join(REPORTS_DIR, d))
+        and d not in ADDITIONAL_FOLDERS
     ]
     
-    # Date and Officer Selection
+    # Form inputs
     col1, col2 = st.columns(2)
-    
     with col1:
         selected_date = st.date_input(
-            "Select Report Date",
+            "Report Date",
             value=datetime.now().date(),
-            min_value=datetime.now().date() - timedelta(days=30),
-            max_value=datetime.now().date(),
-            help="Select the date for which you're submitting the report"
+            max_value=datetime.now().date()
         )
     
     with col2:
-        day_types = {
-            "Daily": "Regular daily report",
-            "Weekly": "Weekly summary report",
-            "Monthly": "Monthly overview report",
-            "Special": "Special assignment report"
-        }
-        
-        selected_day_type = st.selectbox(
-            "Select Report Type",
-            options=list(day_types.keys()),
-            help="Choose the type of report you're submitting"
-        )
-        st.caption(day_types[selected_day_type])
+        report_type = st.selectbox("Report Type", REPORT_TYPES)
     
-    # Officer and Company Selection
-    col3, col4 = st.columns(2)
+    # Officer selection with option to add new
+    officer_name = st.selectbox(
+        "Officer Name",
+        ["Select Officer..."] + sorted(officer_folders) + ["+ Add New Officer"]
+    )
     
-    with col3:
-        officer_name = st.selectbox(
-            "Select Officer",
-            options=["Select Officer..."] + sorted(officer_folders) + ["+ Add New Officer"],
-            index=0,
-            help="Choose your name from the list or add a new officer"
-        )
-        
-        # Show text input if "Add New Officer" is selected
-        new_officer_added = False
-        if officer_name == "+ Add New Officer":
-            new_officer = st.text_input("Enter New Officer Name")
-            if new_officer:
-                # Create necessary folders for new officer
-                try:
-                    # Create main officer folder
-                    officer_path = os.path.join(REPORTS_DIR, new_officer)
-                    if not os.path.exists(officer_path):
-                        os.makedirs(officer_path)
-                        
-                    # Create standard subfolders
-                    for subfolder in ['reports', 'attachments']:
-                        subfolder_path = os.path.join(officer_path, subfolder)
-                        if not os.path.exists(subfolder_path):
-                            os.makedirs(subfolder_path)
-                    
-                    officer_name = new_officer
-                    new_officer_added = True
-                    st.success(f"New officer '{new_officer}' added successfully!")
-                except Exception as e:
-                    st.error(f"Error creating officer folders: {str(e)}")
-        elif officer_name == "Select Officer...":
-            officer_name = ""
+    if officer_name == "+ Add New Officer":
+        new_officer = st.text_input("Enter New Officer Name")
+        if new_officer:
+            officer_name = new_officer
+            # Create officer directory if it doesn't exist
+            officer_dir = os.path.join(REPORTS_DIR, new_officer)
+            if not os.path.exists(officer_dir):
+                os.makedirs(officer_dir)
+                st.success(f"Created new officer folder for {new_officer}")
     
-    with col4:
-        company_name = st.text_input("Company Name")
+    company_name = st.text_input("Company Name")
+    tasks = st.text_area("Tasks Completed")
+    challenges = st.text_area("Challenges Encountered")
+    solutions = st.text_area("Proposed Solutions")
     
-    # Rest of the form
-    tasks = st.text_area("Tasks Completed", height=150)
+    # File upload
+    uploaded_files = st.file_uploader(
+        "Attach Files",
+        accept_multiple_files=True,
+        type=ALLOWED_ATTACHMENT_TYPES
+    )
     
-    col5, col6 = st.columns(2)
-    with col5:
-        challenges = st.text_area("Challenges Faced", height=150)
-    with col6:
-        solutions = st.text_area("Solutions Implemented", height=150)
-    
-    uploaded_files = st.file_uploader("Attach Files", accept_multiple_files=True)
-    
-    if st.button("Submit Report", use_container_width=True):
-        if officer_name and company_name and tasks:
+    if st.button("Submit Report"):
+        if officer_name and officer_name not in ["Select Officer...", "+ Add New Officer"] and tasks:
             try:
+                # Save attachments if any
+                attachment_paths = []
+                if uploaded_files:
+                    for file in uploaded_files:
+                        attachment_dir = os.path.join(REPORTS_DIR, "Attachments", 
+                                                    officer_name, selected_date.strftime('%Y_%m_%d'))
+                        os.makedirs(attachment_dir, exist_ok=True)
+                        file_path = os.path.join(attachment_dir, file.name)
+                        with open(file_path, 'wb') as f:
+                            f.write(file.getbuffer())
+                        attachment_paths.append(file_path)
+                
                 # Create report data
                 report_data = {
-                    "type": selected_day_type,
+                    "type": report_type,
                     "date": selected_date.strftime("%Y-%m-%d"),
                     "officer_name": officer_name,
                     "company_name": company_name,
                     "tasks": tasks,
                     "challenges": challenges,
                     "solutions": solutions,
-                    "attachments": [file.name for file in uploaded_files] if uploaded_files else []
+                    "attachments": attachment_paths
                 }
                 
-                # Use reports subfolder for new structure
-                reports_folder = os.path.join(REPORTS_DIR, officer_name, 'reports')
-                if not os.path.exists(reports_folder):
-                    os.makedirs(reports_folder)
+                # Save the report
+                save_report(officer_name, report_data)
+                st.success("Report submitted successfully!")
                 
-                # Save report
-                file_name = f"{selected_date.strftime('%Y-%m-%d')}_{selected_day_type}.json"
-                file_path = os.path.join(reports_folder, file_name)
-                
-                if os.path.exists(file_path):
-                    if st.warning(f"A report already exists for {selected_date}. Do you want to overwrite it?"):
-                        if st.button("Yes, Overwrite"):
-                            with open(file_path, 'w') as f:
-                                json.dump(report_data, f, indent=4)
-                            st.success("Report updated successfully!")
-                else:
-                    with open(file_path, 'w') as f:
-                        json.dump(report_data, f, indent=4)
-                    st.success("Report submitted successfully!")
-                
-                # Handle attachments
-                if uploaded_files:
-                    attachments_folder = os.path.join(REPORTS_DIR, officer_name, 'attachments')
-                    if not os.path.exists(attachments_folder):
-                        os.makedirs(attachments_folder)
-                    
-                    for file in uploaded_files:
-                        file_path = os.path.join(attachments_folder, file.name)
-                        with open(file_path, 'wb') as f:
-                            f.write(file.getbuffer())
+                # Clear the form (optional)
+                st.experimental_rerun()
                 
             except Exception as e:
                 st.error(f"Error submitting report: {str(e)}")
         else:
-            st.warning("Please fill in all required fields (Officer Name, Company Name, and Tasks)")
+            st.warning("Please fill in all required fields (Officer Name and Tasks)")
 
 def show_report_type_distribution():
     """Show distribution of report types with all categories"""
@@ -1667,9 +1428,9 @@ def show_report_type_distribution():
     }
     
     for report in all_reports:
-        report_type = report.get('type', 'Daily')  # Default to Daily if type not specified
-        if report_type in report_types:
-            report_types[report_type] += 1
+        rpt_type = report.get('type', 'Daily')  # Default to Daily if type not specified
+        if rpt_type in report_types:
+            report_types[rpt_type] += 1
     
     # Create pie chart
     fig = go.Figure(data=[go.Pie(
@@ -1721,27 +1482,44 @@ def show_report_type_distribution():
     with col4:
         st.metric("Special Reports", report_types['Special'])
 
+def link_task_to_report(task_id, report_id):
+    """Link a task to a specific report"""
+    task_path = os.path.join(TASK_DIR, f"task_{task_id}.json")
+    if os.path.exists(task_path):
+        with open(task_path, 'r') as f:
+            task_data = json.load(f)
+        task_data['linked_report'] = report_id
+        with open(task_path, 'w') as f:
+            json.dump(task_data, f, indent=4)
+
 def main():
-    """Updated main application"""
-    st.title("Officer Report Dashboard")
+    """Main function to run the application"""
+    st.set_page_config(page_title="Officer Reports & Task Management", layout="wide")
     
     # Initialize folders
     init_folders()
     
     # Sidebar navigation
-    page = st.sidebar.radio("Navigation", 
-                          ["Dashboard", "Submit Report", "View Reports", 
-                           "Manage Folders", "Summaries"])
+    st.sidebar.title("Navigation")
     
-    if page == "Dashboard":
+    # Add Task Management to the navigation options
+    nav_option = st.sidebar.radio(
+        "Go to",
+        ["Dashboard", "Submit Report", "View Reports", "Report Summaries", 
+         "Task Management", "Manage Folders"]
+    )
+    
+    if nav_option == "Dashboard":
         create_dashboard()
-    elif page == "Submit Report":
+    elif nav_option == "Submit Report":
         submit_report()
-    elif page == "View Reports":
+    elif nav_option == "View Reports":
         view_reports()
-    elif page == "Summaries":
+    elif nav_option == "Report Summaries":
         show_summaries()
-    else:
+    elif nav_option == "Task Management":
+        create_task_dashboard()
+    elif nav_option == "Manage Folders":
         manage_folders()
 
 if __name__ == "__main__":
