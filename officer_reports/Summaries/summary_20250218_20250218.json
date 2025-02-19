@@ -1,0 +1,27 @@
+{
+    "period": "2025-02-18 to 2025-02-18",
+    "total_reports": 1,
+    "officers": 1,
+    "companies": 1,
+    "report_types": {
+        "Daily": 1
+    },
+    "officer_activity": {
+        "Bismark Abban": 1
+    },
+    "company_distribution": {
+        "SIMO SCHOOL": 1
+    },
+    "recent_reports": [
+        {
+            "type": "Daily",
+            "officer_name": "Bismark Abban",
+            "date": "2025-02-18",
+            "company_name": "SIMO SCHOOL",
+            "tasks": "I Validated the company",
+            "challenges": "There were missing schedules for the company.",
+            "solutions": "Send an email to the company to send the Missing schedule",
+            "attachments": []
+        }
+    ]
+}

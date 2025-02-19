@@ -1,0 +1,27 @@
+{
+    "period": "2025-02-19 to 2025-02-19",
+    "total_reports": 1,
+    "officers": 1,
+    "companies": 1,
+    "report_types": {
+        "Daily": 1
+    },
+    "officer_activity": {
+        "Bismark Abban": 1
+    },
+    "company_distribution": {
+        "TT. Brothers": 1
+    },
+    "recent_reports": [
+        {
+            "type": "Daily",
+            "date": "2025-02-19",
+            "officer_name": "Bismark Abban",
+            "company_name": "TT. Brothers",
+            "tasks": "I completed many",
+            "challenges": "Hhegg",
+            "solutions": "agggggsa",
+            "attachments": NaN
+        }
+    ]
+}
