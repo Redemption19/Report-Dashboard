@@ -406,543 +406,115 @@ def manage_folders():
     """Create and manage folders with enhanced visual interface"""
     st.header("Manage Folders")
     
-    # Custom CSS for better spacing only
-    st.markdown("""
-        <style>
-            /* Container spacing */
-            .block-container {
-                padding: 2rem 1rem !important;
-            }
-            
-            /* Table spacing */
-            .stDataFrame {
-                width: 100% !important;
-            }
-            
-            /* File list spacing */
-            [data-testid="stVerticalBlock"] > [style*="flex-direction: column"] > div {
-                margin-bottom: 1.5rem;
-            }
-            
-            /* Button spacing */
-            .stButton > button {
-                margin: 0.5rem 0;
-                width: 100%;
-            }
-            
-            /* Selectbox spacing */
-            .stSelectbox {
-                margin: 1rem 0;
-            }
-            
-            /* Section spacing */
-            .section-spacing {
-                margin: 2rem 0;
-                padding: 1rem;
-            }
-            
-            /* Grid layout spacing */
-            .row-widget {
-                margin: 1rem 0;
-            }
-            
-            /* Column spacing */
-            [data-testid="column"] {
-                padding: 0 0.5rem;
-            }
-            
-            /* Header spacing */
-            h1, h2, h3, h4, h5 {
-                margin: 1.5rem 0 1rem 0;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    # Get list of officer folders (excluding system folders)
+    SYSTEM_FOLDERS = {'Summaries', 'Archive', 'Attachments', 'Templates', '__pycache__'}
+    officer_folders = [
+        d for d in os.listdir(REPORTS_DIR) 
+        if os.path.isdir(os.path.join(REPORTS_DIR, d)) 
+        and d not in SYSTEM_FOLDERS
+        and not d.startswith('.')
+        and not d.startswith('__')
+    ]
     
-    # Display existing folders
-    st.subheader("Existing Folders")
-    all_folders = [d for d in os.listdir(REPORTS_DIR) 
-                  if os.path.isdir(os.path.join(REPORTS_DIR, d))]
+    # Folder selection
+    selected_folder = st.selectbox("Select folder to view/manage:", officer_folders)
     
-    if all_folders:
-        # Create tabs for different views
-        tab1, tab2 = st.tabs(["📂 Folder View", "📊 Folder Statistics"])
+    if selected_folder:
+        folder_path = os.path.join(REPORTS_DIR, selected_folder)
+        reports_path = os.path.join(folder_path, 'reports')
         
-        with tab1:
-            # Enhanced folder selection with metrics
-            selected_folder = st.selectbox("Select folder to view/manage:", all_folders)
+        # Action buttons in a row
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("✏️ Rename Folder", use_container_width=True):
+                st.session_state.show_rename = True
+        with col2:
+            if st.button("🗑️ Delete Folder", use_container_width=True):
+                st.session_state.confirm_delete = True
+        with col3:
+            if st.button("ℹ️ Folder Info", use_container_width=True):
+                st.session_state.show_info = True
+        
+        # Display folder contents
+        st.markdown("### 📂 Folder Contents")
+        st.markdown("#### 📄 Files")
+        
+        # Get list of files from reports directory
+        if os.path.exists(reports_path):
+            files = [f for f in os.listdir(reports_path) if f.endswith('.json')]
             
-            if selected_folder:
-                folder_path = os.path.join(REPORTS_DIR, selected_folder)
+            if files:
+                # Create DataFrame for files
+                file_data = []
+                for filename in files:
+                    file_path = os.path.join(reports_path, filename)
+                    file_stat = os.stat(file_path)
+                    file_data.append({
+                        "Name": filename,
+                        "Size": f"{file_stat.st_size/1024:.1f} KB",
+                        "Modified": datetime.fromtimestamp(file_stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                        "Actions": filename
+                    })
                 
-                # Folder actions in a container
-                with st.container():
+                df = pd.DataFrame(file_data)
+                st.dataframe(
+                    df,
+                    column_config={
+                        "Name": st.column_config.Column(
+                            "Name",
+                            width="medium"
+                        ),
+                        "Size": st.column_config.Column(
+                            "Size",
+                            width="small"
+                        ),
+                        "Modified": st.column_config.Column(
+                            "Modified",
+                            width="medium"
+                        ),
+                        "Actions": st.column_config.Column(
+                            "Actions",
+                            width="medium"
+                        )
+                    },
+                    hide_index=True
+                )
+                
+                # File actions
+                selected_file = st.selectbox("Select file for actions:", files)
+                if selected_file:
                     col1, col2, col3 = st.columns(3)
-                    
                     with col1:
-                        if st.button("✏️ Rename Folder", use_container_width=True):
-                            st.session_state.show_rename = True
-                            
-                    with col2:
-                        if st.button("🗑️ Delete Folder", use_container_width=True):
-                            if st.session_state.get('confirm_delete', False):
-                                try:
-                                    import shutil
-                                    shutil.rmtree(folder_path)
-                                    st.success(f"Folder '{selected_folder}' deleted successfully!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error deleting folder: {str(e)}")
-                            else:
-                                st.session_state.confirm_delete = True
-                                st.warning(f"Are you sure you want to delete '{selected_folder}'? Click delete again to confirm.")
-                    
-                    with col3:
-                        # Add folder info button
-                        if st.button("ℹ️ Folder Info", use_container_width=True):
-                            st.session_state.show_info = True
-                
-                # Rename folder interface
-                if st.session_state.get('show_rename', False):
-                    with st.expander("Rename Folder", expanded=True):
-                        new_name = st.text_input("Enter new folder name:", selected_folder)
-                        if st.button("✅ Confirm Rename"):
-                            if new_name and new_name != selected_folder:
-                                try:
-                                    new_path = os.path.join(REPORTS_DIR, new_name)
-                                    if os.path.exists(new_path):
-                                        st.warning(f"Folder '{new_name}' already exists!")
-                                    else:
-                                        os.rename(folder_path, new_path)
-                                        st.success(f"Folder renamed to '{new_name}' successfully!")
-                                        st.session_state.show_rename = False
-                                        st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error renaming folder: {str(e)}")
-                
-                # Folder info display
-                if st.session_state.get('show_info', False):
-                    with st.expander("Folder Information", expanded=True):
-                        contents = os.listdir(folder_path)
-                        total_size = sum(os.path.getsize(os.path.join(folder_path, f)) 
-                                       for f in contents if os.path.isfile(os.path.join(folder_path, f)))
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Total Items", len(contents))
-                        with col2:
-                            st.metric("Size", f"{total_size/1024:.1f} KB")
-                        with col3:
-                            st.metric("Last Modified", 
-                                    datetime.fromtimestamp(os.path.getmtime(folder_path))
-                                    .strftime("%Y-%m-%d"))
-                
-                # Display folder contents with enhanced visuals
-                st.markdown("### 📂 Folder Contents")
-                contents = os.listdir(folder_path)
-                
-                # Separate files and folders
-                subfolders = [item for item in contents if os.path.isdir(os.path.join(folder_path, item))]
-                files = [item for item in contents if os.path.isfile(os.path.join(folder_path, item))]
-                
-                # Display subfolders in a grid
-                if subfolders:
-                    st.markdown("#### 📁 Subfolders")
-                    cols = st.columns(3)
-                    for idx, subfolder in enumerate(subfolders):
-                        with cols[idx % 3]:
-                            with st.container():
-                                st.markdown(f"**{subfolder}**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    if st.button("🗑️", key=f"del_{subfolder}", help="Delete subfolder"):
-                                        try:
-                                            import shutil
-                                            shutil.rmtree(os.path.join(folder_path, subfolder))
-                                            st.success(f"Subfolder '{subfolder}' deleted!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Error deleting subfolder: {str(e)}")
-                                with col2:
-                                    if st.button("📊", key=f"info_{subfolder}", help="Subfolder info"):
-                                        subfolder_path = os.path.join(folder_path, subfolder)
-                                        subfolder_contents = os.listdir(subfolder_path)
-                                        st.info(f"Items: {len(subfolder_contents)}")
-                
-                # Display files in a table with actions
-                if files:
-                    st.markdown("#### 📄 Files")
-                    file_data = []
-                    for file in files:
-                        file_path = os.path.join(folder_path, file)
-                        file_size = os.path.getsize(file_path)
-                        file_date = datetime.fromtimestamp(os.path.getmtime(file_path))
-                        file_data.append({
-                            "Name": file,
-                            "Size": f"{file_size/1024:.1f} KB",
-                            "Modified": file_date.strftime("%Y-%m-%d %H:%M"),
-                            "Actions": file
-                        })
-                    
-                    df = pd.DataFrame(file_data)
-                    st.dataframe(
-                        df,
-                        column_config={
-                            "Actions": st.column_config.Column(
-                                "Actions",
-                                width="medium",
-                                help="Available actions for the file"
-                            )
-                        },
-                        hide_index=True
-                    )
-                    
-                    # File actions
-                    selected_file = st.selectbox("Select file for actions:", files)
-                    if selected_file:
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            if st.button("👁️ View", use_container_width=True):
-                                file_path = os.path.join(folder_path, selected_file)
-                                try:
-                                    with open(file_path, 'r') as f:
-                                        content = json.load(f)
-                                    
-                                    # Custom CSS focusing on the top grid items
-                                    st.markdown("""
-                                        <style>
-                                            /* Top grid layout control */
-                                            .report-grid {
-                                                display: grid;
-                                                grid-template-columns: repeat(3, minmax(250px, 1fr));
-                                                gap: 1.5rem;
-                                                margin: 1.5rem 0;
-                                                width: 100%;
-                                            }
-                                            
-                                            .grid-item {
-                                                background-color: #2d2d2d;
-                                                padding: 1.5rem;
-                                                border-radius: 8px;
-                                                text-align: center;
-                                                border: 1px solid #3d3d3d;
-                                                min-width: 250px;  /* Minimum width for each item */
-                                            }
-                                            
-                                            .grid-item h4 {
-                                                color: #9e9e9e;
-                                                margin-bottom: 0.75rem;
-                                                font-size: 0.9rem;
-                                                text-transform: uppercase;
-                                                letter-spacing: 0.05em;
-                                            }
-                                            
-                                            .grid-item p {
-                                                color: #ffffff;
-                                                font-size: 1.1rem;
-                                                margin: 0;
-                                                font-weight: 500;
-                                            }
-                                            
-                                            /* Container adjustments for the grid */
-                                            [data-testid="stHorizontalBlock"] {
-                                                gap: 1.5rem !important;
-                                                padding: 0 1rem !important;
-                                            }
-                                        </style>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # Report Header Grid with expanded width
-                                    st.markdown("""
-                                        <div class="report-grid">
-                                            <div class="grid-item">
-                                                <h4>Report Type</h4>
-                                                <p>{}</p>
-                                            </div>
-                                            <div class="grid-item">
-                                                <h4>Date</h4>
-                                                <p>{}</p>
-                                            </div>
-                                            <div class="grid-item">
-                                                <h4>Officer</h4>
-                                                <p>{}</p>
-                                            </div>
-                                        </div>
-                                    """.format(
-                                        content.get('type', 'N/A'),
-                                        content.get('date', 'N/A'),
-                                        content.get('officer_name', 'N/A')
-                                    ), unsafe_allow_html=True)
-                                    
-                                    # Add CSS for company section
-                                    st.markdown("""
-                                        <style>
-                                            /* Company section styling */
-                                            .company-grid {
-                                                display: grid;
-                                                grid-template-columns: 1fr;
-                                                margin: 1.5rem 0;
-                                                width: 100%;
-                                            }
-                                            
-                                            .company-item {
-                                                background-color: #2d2d2d;
-                                                padding: 1.5rem;
-                                                border-radius: 8px;
-                                                border: 1px solid #3d3d3d;
-                                                min-width: 350px;
-                                            }
-                                            
-                                            .company-item h4 {
-                                                color: #9e9e9e;
-                                                margin-bottom: 1rem;
-                                                font-size: 1rem;
-                                                text-transform: uppercase;
-                                                letter-spacing: 0.05em;
-                                                display: flex;
-                                                align-items: center;
-                                                gap: 0.5rem;
-                                            }
-                                            
-                                            .company-content {
-                                                background-color: #363636;
-                                                padding: 1.25rem;
-                                                border-radius: 6px;
-                                                color: #ffffff;
-                                                font-size: 1.1rem;
-                                                font-weight: 500;
-                                            }
-                                        </style>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # Update the Company section with new styling
-                                    st.markdown("""
-                                        <div class="company-grid">
-                                            <div class="company-item">
-                                                <h4>🏢 Company</h4>
-                                                <div class="company-content">
-                                                    {}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    """.format(content.get('company_name', 'N/A')), unsafe_allow_html=True)
-                                    
-                                    # Tasks Section
-                                    st.markdown('<div class="content-box">', unsafe_allow_html=True)
-                                    st.markdown("##### TASKS")
-                                    tasks = content.get('tasks', '').split('\n')
-                                    for task in tasks:
-                                        if task.strip():
-                                            st.markdown(f"""
-                                                <div style='background-color: #363636; padding: 0.75rem; 
-                                                          border-radius: 6px; margin: 0.5rem 0;'>
-                                                    ✓ {task.strip()}
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                                    
-                                    # Add these CSS rules for Challenges and Solutions grid
-                                    st.markdown("""
-                                        <style>
-                                            /* Challenges and Solutions grid */
-                                            .challenge-solution-grid {
-                                                display: grid;
-                                                grid-template-columns: repeat(2, minmax(350px, 1fr));
-                                                gap: 1.5rem;
-                                                margin: 1.5rem 0;
-                                                width: 100%;
-                                            }
-                                            
-                                            .challenge-solution-item {
-                                                background-color: #2d2d2d;
-                                                padding: 1.5rem;
-                                                border-radius: 8px;
-                                                border: 1px solid #3d3d3d;
-                                                min-width: 350px;
-                                            }
-                                            
-                                            .challenge-solution-item h4 {
-                                                color: #9e9e9e;
-                                                margin-bottom: 1rem;
-                                                font-size: 1rem;
-                                                text-transform: uppercase;
-                                                letter-spacing: 0.05em;
-                                                display: flex;
-                                                align-items: center;
-                                                gap: 0.5rem;
-                                            }
-                                            
-                                            .challenge-solution-content {
-                                                background-color: #363636;
-                                                padding: 1.25rem;
-                                                border-radius: 6px;
-                                                color: #ffffff;
-                                                font-size: 1rem;
-                                                line-height: 1.5;
-                                                min-height: 100px;
-                                            }
-                                        </style>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # Update the Challenges and Solutions section
-                                    st.markdown("""
-                                        <div class="challenge-solution-grid">
-                                            <div class="challenge-solution-item">
-                                                <h4>⚠️ Challenges</h4>
-                                                <div class="challenge-solution-content">
-                                                    {}
-                                                </div>
-                                            </div>
-                                            <div class="challenge-solution-item">
-                                                <h4>💡 Solutions</h4>
-                                                <div class="challenge-solution-content">
-                                                    {}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    """.format(
-                                        content.get('challenges', 'No challenges recorded'),
-                                        content.get('solutions', 'No solutions recorded')
-                                    ), unsafe_allow_html=True)
-                                    
-                                    # Attachments Section
-                                    if content.get('attachments'):
-                                        st.markdown('<div class="content-box">', unsafe_allow_html=True)
-                                        st.markdown("##### ATTACHMENTS")
-                                        for attachment in content['attachments']:
-                                            st.markdown(f"""
-                                                <div style='background-color: #363636; padding: 0.75rem; 
-                                                          border-radius: 6px; margin: 0.5rem 0;'>
-                                                    📎 {attachment}
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                        st.markdown('</div>', unsafe_allow_html=True)
-                                    
-                                    # Download Button
-                                    st.markdown("<div style='margin-top: 2rem;'>", unsafe_allow_html=True)
-                                    st.download_button(
-                                        label="📥 Download Report",
-                                        data=json.dumps(content, indent=4),
-                                        file_name=selected_file,
-                                        mime="application/json",
-                                        use_container_width=True
-                                    )
-                                    st.markdown("</div>", unsafe_allow_html=True)
-                                    
-                                except json.JSONDecodeError:
-                                    with open(file_path, 'r') as f:
-                                        content = f.read()
-                                    st.markdown('<div class="content-box">', unsafe_allow_html=True)
-                                    st.markdown("##### FILE CONTENT")
-                                    st.text_area("", value=content, height=300, disabled=True)
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                                except Exception as e:
-                                    st.error(f"Error reading file: {str(e)}")
-                        with col2:
-                            if st.button("🗑️ Delete", use_container_width=True):
-                                try:
-                                    os.remove(os.path.join(folder_path, selected_file))
-                                    st.success(f"File '{selected_file}' deleted!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error deleting file: {str(e)}")
-                        with col3:
-                            if st.button("📥 Download", use_container_width=True):
-                                file_path = os.path.join(folder_path, selected_file)
-                                with open(file_path, 'rb') as f:
-                                    st.download_button(
-                                        label="Confirm Download",
-                                        data=f.read(),
-                                        file_name=selected_file,
-                                        mime="application/octet-stream"
-                                    )
-                
-                if not contents:
-                    st.info("This folder is empty")
-                
-                # Create subfolder interface
-                with st.expander("Create New Subfolder"):
-                    subfolder_name = st.text_input(f"Enter subfolder name for '{selected_folder}':")
-                    if st.button("📁 Create Subfolder"):
-                        if subfolder_name:
+                        if st.button("👁️ View", use_container_width=True):
+                            file_path = os.path.join(reports_path, selected_file)
                             try:
-                                subfolder_path = os.path.join(folder_path, subfolder_name)
-                                if os.path.exists(subfolder_path):
-                                    st.warning(f"Subfolder '{subfolder_name}' already exists!")
-                                else:
-                                    os.makedirs(subfolder_path)
-                                    st.success(f"Subfolder '{subfolder_name}' created successfully!")
-                                    st.rerun()
+                                with open(file_path, 'r') as f:
+                                    content = json.load(f)
+                                st.json(content)
                             except Exception as e:
-                                st.error(f"Error creating subfolder: {str(e)}")
-                        else:
-                            st.warning("Please enter a subfolder name.")
-        
-        with tab2:
-            # Folder statistics and visualizations
-            st.subheader("Folder Statistics")
-            folder_sizes = {}
-            folder_items = {}
-            
-            for folder in all_folders:
-                folder_path = os.path.join(REPORTS_DIR, folder)
-                contents = os.listdir(folder_path)
-                size = sum(os.path.getsize(os.path.join(folder_path, f)) 
-                          for f in contents if os.path.isfile(os.path.join(folder_path, f)))
-                folder_sizes[folder] = size/1024  # Convert to KB
-                folder_items[folder] = len(contents)
-            
-            # Display folder size distribution
-            fig_sizes = {
-                'data': [{
-                    'type': 'pie',
-                    'labels': list(folder_sizes.keys()),
-                    'values': list(folder_sizes.values()),
-                    'hole': 0.4,
-                }],
-                'layout': {
-                    'title': 'Folder Size Distribution (KB)',
-                    'height': 400
-                }
-            }
-            st.plotly_chart(fig_sizes, use_container_width=True)
-            
-            # Display items per folder
-            fig_items = {
-                'data': [{
-                    'type': 'bar',
-                    'x': list(folder_items.keys()),
-                    'y': list(folder_items.values()),
-                    'marker': {'color': 'lightblue'},
-                }],
-                'layout': {
-                    'title': 'Items per Folder',
-                    'height': 400,
-                    'xaxis': {'tickangle': 45}
-                }
-            }
-            st.plotly_chart(fig_items, use_container_width=True)
-    
-    else:
-        st.info("No folders created yet.")
-    
-    # Create new main folder interface
-    with st.expander("Create New Main Folder"):
-        st.write("### Create New Main Folder")
-        new_folder = st.text_input("Enter folder name:")
-        if st.button("📁 Create Folder"):
-            if new_folder:
-                try:
-                    folder_path = os.path.join(REPORTS_DIR, new_folder)
-                    if os.path.exists(folder_path):
-                        st.warning(f"Folder '{new_folder}' already exists!")
-                    else:
-                        os.makedirs(folder_path)
-                        st.success(f"Folder '{new_folder}' created successfully!")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Error creating folder: {str(e)}")
+                                st.error(f"Error reading file: {str(e)}")
+                    with col2:
+                        if st.button("🗑️ Delete", use_container_width=True):
+                            try:
+                                os.remove(os.path.join(reports_path, selected_file))
+                                st.success(f"File '{selected_file}' deleted!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error deleting file: {str(e)}")
+                    with col3:
+                        if st.button("📥 Download", use_container_width=True):
+                            file_path = os.path.join(reports_path, selected_file)
+                            with open(file_path, 'rb') as f:
+                                st.download_button(
+                                    label="Confirm Download",
+                                    data=f.read(),
+                                    file_name=selected_file,
+                                    mime="application/json"
+                                )
             else:
-                st.warning("Please enter a folder name.")
+                st.info("No files found in this folder")
+        else:
+            st.info("Reports folder not found")
 
 def show_summaries():
     """Show summaries with proper folder filtering"""
@@ -1556,22 +1128,27 @@ def submit_report():
         if officer_name == "+ Add New Officer":
             new_officer = st.text_input("Enter New Officer Name")
             if new_officer:
-                # Create necessary folders for new officer
                 try:
                     # Create main officer folder
                     officer_path = os.path.join(REPORTS_DIR, new_officer)
                     if not os.path.exists(officer_path):
+                        # Create base officer folder
                         os.makedirs(officer_path)
                         
-                    # Create standard subfolders
-                    for subfolder in ['reports', 'attachments']:
-                        subfolder_path = os.path.join(officer_path, subfolder)
-                        if not os.path.exists(subfolder_path):
-                            os.makedirs(subfolder_path)
-                    
-                    officer_name = new_officer
-                    new_officer_added = True
-                    st.success(f"New officer '{new_officer}' added successfully!")
+                        # Create reports folder (this is where the json files will be stored)
+                        reports_dir = os.path.join(officer_path, 'reports')
+                        os.makedirs(reports_dir)
+                        
+                        # Create a sample README file to maintain folder structure
+                        readme_path = os.path.join(officer_path, "README.txt")
+                        with open(readme_path, 'w') as f:
+                            f.write(f"Report folder for {new_officer}")
+                        
+                        officer_name = new_officer
+                        new_officer_added = True
+                        st.success(f"New officer '{new_officer}' added successfully!")
+                    else:
+                        st.warning(f"Officer '{new_officer}' already exists!")
                 except Exception as e:
                     st.error(f"Error creating officer folders: {str(e)}")
         elif officer_name == "Select Officer...":
