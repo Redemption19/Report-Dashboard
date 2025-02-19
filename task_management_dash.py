@@ -270,6 +270,12 @@ def show_task_list():
     """Display and manage task list"""
     st.header("Task List")
     
+    # Initialize session states if they don't exist
+    if 'show_task_form' not in st.session_state:
+        st.session_state.show_task_form = False
+    if 'editing_task' not in st.session_state:
+        st.session_state.editing_task = None
+    
     # Get officer names
     officer_names = get_officer_names()
     
@@ -286,7 +292,6 @@ def show_task_list():
     if st.button("➕ Add New Task"):
         st.session_state.show_task_form = True
         st.session_state.editing_task = None
-        st.session_state.new_assignee = False
     
     # Task creation/editing form
     if st.session_state.show_task_form:
@@ -358,7 +363,7 @@ def show_task_list():
                         "comments": editing_task.get('comments', []) if editing_task else []
                     }
                     save_task(task_data)
-                    st.success(f"Task {'updated' if editing_task else 'created'} successfully and assigned to {final_assignee}!")
+                    st.success(f"Task {'updated' if editing_task else 'created'} successfully!")
                     st.session_state.show_task_form = False
                     st.session_state.editing_task = None
                     st.rerun()
@@ -798,14 +803,6 @@ def show_analytics_reports():
         
         else:  # PDF
             st.warning("PDF export functionality coming soon!")
-
-# Initialize session state for task form
-if 'show_task_form' not in st.session_state:
-    st.session_state.show_task_form = False
-
-# Add to your session state initialization at the top of the file
-if 'editing_task' not in st.session_state:
-    st.session_state.editing_task = None
 
 # Main app
 if __name__ == "__main__":

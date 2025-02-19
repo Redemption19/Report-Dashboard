@@ -6,6 +6,7 @@ import pandas as pd
 import shutil
 from io import BytesIO
 import plotly.graph_objects as go
+import time
 
 
 # Add these imports at the top of your file
@@ -1007,7 +1008,6 @@ def show_summaries():
             recent_df['Tasks'] = recent_df['Tasks'].apply(
                 lambda x: str(x)[:100] + '...' if len(str(x)) > 100 else str(x)
             )
-            
             st.dataframe(
                 recent_df,
                 use_container_width=True,
@@ -1364,6 +1364,10 @@ def submit_report():
         type=ALLOWED_ATTACHMENT_TYPES
     )
     
+    # Initialize session state for success message if not exists
+    if 'report_submitted' not in st.session_state:
+        st.session_state.report_submitted = False
+    
     if st.button("Submit Report"):
         if officer_name and officer_name not in ["Select Officer...", "+ Add New Officer"] and tasks:
             try:
@@ -1393,15 +1397,24 @@ def submit_report():
                 
                 # Save the report
                 save_report(officer_name, report_data)
+                st.session_state.report_submitted = True
+                
+                # Show success message
                 st.success("Report submitted successfully!")
                 
-                # Clear the form (optional)
-                st.experimental_rerun()
+                # Wait a moment before rerunning
+                time.sleep(1)
+                st.rerun()
                 
             except Exception as e:
                 st.error(f"Error submitting report: {str(e)}")
         else:
             st.warning("Please fill in all required fields (Officer Name and Tasks)")
+    
+    # Show success message if report was just submitted
+    if st.session_state.report_submitted:
+        st.success("Report submitted successfully!")
+        st.session_state.report_submitted = False
 
 def show_report_type_distribution():
     """Show distribution of report types with all categories"""
