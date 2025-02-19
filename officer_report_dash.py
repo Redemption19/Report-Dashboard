@@ -59,10 +59,16 @@ def load_reports(officer_name=None):
     reports = []
     if officer_name:
         officer_dir = os.path.join(REPORTS_DIR, officer_name)
-        if os.path.exists(officer_dir):
-            for filename in os.listdir(officer_dir):
-                with open(os.path.join(officer_dir, filename), 'r') as f:
-                    reports.append(json.load(f))
+        reports_dir = os.path.join(officer_dir, 'reports')  # Look in reports subfolder
+        if os.path.exists(reports_dir):
+            for filename in os.listdir(reports_dir):
+                if filename.endswith('.json'):  # Only process JSON files
+                    try:
+                        with open(os.path.join(reports_dir, filename), 'r') as f:
+                            reports.append(json.load(f))
+                    except Exception as e:
+                        st.warning(f"Error reading report {filename}: {str(e)}")
+                        continue
     return reports
 
 def load_template(template_name):
