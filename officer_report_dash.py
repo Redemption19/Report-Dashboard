@@ -483,6 +483,7 @@ def view_reports():
                 "Company": st.column_config.TextColumn(
                     "Company",
                     width="medium",
+                    help="Company name"
                 ),
                 "Tasks": st.column_config.TextColumn(
                     "Tasks",
@@ -1388,6 +1389,7 @@ def show_detailed_analysis():
                 "Company": st.column_config.TextColumn(
                     "Company",
                     width="medium",
+                    help="Company name"
                 ),
                 "Tasks": st.column_config.TextColumn(
                     "Tasks",
@@ -1401,6 +1403,10 @@ def show_detailed_analysis():
 
 def submit_report():
     """Submit a new report"""
+    # Initialize session state variable if it doesn't exist
+    if 'report_submitted' not in st.session_state:
+        st.session_state.report_submitted = False
+
     st.header("Submit New Report")
     
     # Get list of existing officer folders
@@ -1420,10 +1426,14 @@ def submit_report():
         )
     
     with col2:
-        report_category = st.selectbox("Report Type", ["Schedule Upload Report", "Global Deposit Assigning"])
+        report_category = st.selectbox(
+            "Report Type", 
+            ["Schedule Upload Report", "Global Deposit Assigning", "Other Report"]
+        )
     
     with col3:
-        report_frequency = st.selectbox("Frequency", ["Daily", "Weekly", "Monthly"])
+        if report_category != "Other Report":
+            report_frequency = st.selectbox("Frequency", ["Daily", "Weekly", "Monthly"])
     
     # Officer selection with option to add new
     officer_name = st.selectbox(
@@ -1442,7 +1452,7 @@ def submit_report():
                 st.success(f"Created new officer folder for {new_officer}")
     
     # Dynamic fields based on report type
-    col1, col2, col3 = st.columns([3, 2, 3])  # Adjusted column ratios
+    col1, col2, col3 = st.columns([3, 2, 3])
     
     if report_category == "Schedule Upload Report":
         with col1:
@@ -1456,11 +1466,11 @@ def submit_report():
                 <i>Please specify the total schedule files you have successfully completed for this company and the total number of years for these schedule</i>
                 </div>
             """, unsafe_allow_html=True)
-    else:  # Global Deposit Assigning
+    elif report_category == "Global Deposit Assigning":
         with col1:
             companies_assigned = st.text_area(
                 "List Companies Assigned",
-                height=150,  # Same height as Tasks field
+                height=150,
                 key="companies_text_area",
                 placeholder=(
                     "Example:\n"
@@ -1482,22 +1492,33 @@ def submit_report():
                 <i>Please list each company on a new line. The total should match the number of companies assigned.</i>
                 </div>
             """, unsafe_allow_html=True)
+    else:  # Other Report
+        with col1:
+            other_company = st.text_input("Company Name or Please Specify")
+        with col3:
+            st.markdown("""
+                <div style='padding: 10px; color: #00FF00;'>
+                <i>Please specify the company name or any other relevant information.</i>
+                </div>
+            """, unsafe_allow_html=True)
     
     tasks = st.text_area("Tasks Completed")
     challenges = st.text_area("Challenges Encountered")
     solutions = st.text_area("Proposed Solutions")
     
     # File upload with proper handling
-    uploaded_files = st.file_uploader(
-        "Attach Files",
-        accept_multiple_files=True,
-        type=ALLOWED_ATTACHMENT_TYPES
-    )
-    
-    # Initialize session state for success message if not exists
-    if 'report_submitted' not in st.session_state:
-        st.session_state.report_submitted = False
-    
+    st.subheader("Attachments")
+    try:
+        uploaded_files = st.file_uploader(
+            "Upload attachments", 
+            accept_multiple_files=True,
+            type=ALLOWED_ATTACHMENT_TYPES
+        )
+    except Exception as e:
+        st.error(f"Error uploading files: {str(e)}")
+        uploaded_files = None
+
+    # Submit Report button and handling
     if st.button("Submit Report"):
         if officer_name and officer_name not in ["Select Officer...", "+ Add New Officer"] and tasks:
             try:
@@ -1516,7 +1537,6 @@ def submit_report():
                 # Create report data based on report type
                 report_data = {
                     "type": report_category,
-                    "frequency": report_frequency,
                     "date": selected_date.strftime("%Y-%m-%d"),
                     "officer_name": officer_name,
                     "tasks": tasks,
@@ -1528,14 +1548,20 @@ def submit_report():
                 # Add type-specific fields
                 if report_category == "Schedule Upload Report":
                     report_data.update({
+                        "frequency": report_frequency,
                         "company_name": company_name,
                         "total_schedule_files": total_files,
                         "total_years": total_years
                     })
-                else:
+                elif report_category == "Global Deposit Assigning":
                     report_data.update({
+                        "frequency": report_frequency,
                         "companies_assigned": companies_assigned,
                         "total_companies": total_companies
+                    })
+                else:  # Other Report
+                    report_data.update({
+                        "company_name": other_company
                     })
                 
                 # Save the report
@@ -1811,13 +1837,23 @@ def show_data_table():
         # Convert reports to DataFrame
         df_data = []
         for report in reports_data:
+            # Fix company/companies display logic
+            if report.get('type') == 'Global Deposit Assigning':
+                # Get companies_assigned field and clean it up
+                companies = report.get('companies_assigned', '').strip()
+                # Convert multiline companies to a single company name for display
+                company_list = [c.strip() for c in companies.split('\n') if c.strip()]
+                # Use the first company as the main display, or N/A if empty
+                company_display = company_list[0] if company_list else 'N/A'
+            else:
+                company_display = report.get('company_name', 'N/A')
+
             row = {
                 'Date': report.get('date', 'N/A'),
                 'Officer': report.get('officer_name', 'N/A'),
                 'Report Type': report.get('type', 'N/A'),
                 'Frequency': report.get('frequency', 'N/A'),
-                'Company/Companies': (report.get('company_name', '') if report.get('type') == 'Schedule Upload Report' 
-                                    else report.get('companies_assigned', '').replace('\n', ', ')) or 'N/A',
+                'Company': company_display,  # Changed from 'Company/Companies'
                 'Tasks': report.get('tasks', 'N/A'),
                 'Challenges': report.get('challenges', 'N/A'),
                 'Solutions': report.get('solutions', 'N/A')
@@ -1917,10 +1953,10 @@ def show_data_table():
                     "Frequency",
                     help="Daily, Weekly, or Monthly"
                 ),
-                "Company/Companies": st.column_config.TextColumn(
-                    "Company/Companies",
-                    width="large",
-                    help="Shows company name for Schedule Upload or list of companies for Global Deposit"
+                "Company": st.column_config.TextColumn(  # Changed from 'Company/Companies'
+                    "Company",
+                    width="medium",
+                    help="Company name"
                 ),
                 "Tasks": st.column_config.TextColumn("Tasks", width="large"),
                 "Challenges": st.column_config.TextColumn("Challenges", width="large"),
@@ -1938,7 +1974,7 @@ def search_reports():
     
     # Get list of officers
     officer_folders = [
-        d for d in os.listdir(REPORTS_DIR) 
+        d for d in os.listdir(REPORTS_DIR)
         if os.path.isdir(os.path.join(REPORTS_DIR, d))
         and d not in ADDITIONAL_FOLDERS
     ]
@@ -1989,14 +2025,14 @@ def search_reports():
                     
                     # Search term filter
                     if search_term:
-                        search_term_lower = search_term.lower()
+                        search_term_lower = search_term.toLowerCase()
                         text_to_search = ' '.join([
                             str(report.get('tasks', '')),
                             str(report.get('challenges', '')),
                             str(report.get('solutions', '')),
                             str(report.get('company_name', '')),
                             str(report.get('companies_assigned', ''))
-                        ]).lower()
+                        ]).toLowerCase()
                         
                         if search_term_lower not in text_to_search:
                             continue
@@ -2016,13 +2052,20 @@ def show_found_reports(found_reports):
         # Convert reports to DataFrame with additional columns
         df_data = []
         for report in found_reports:
+            # Fix company/companies display logic
+            if report.get('type') == 'Global Deposit Assigning':
+                companies = report.get('companies_assigned', '').strip()
+                # Convert multiline companies to comma-separated string
+                companies = ', '.join(filter(None, companies.split('\n')))
+            else:
+                companies = report.get('company_name', '')
+
             row = {
                 'Date': report.get('date', 'N/A'),
                 'Officer': report.get('officer_name', 'N/A'),
                 'Report Type': report.get('type', 'N/A'),
                 'Frequency': report.get('frequency', 'N/A'),
-                'Company/Companies': (report.get('company_name', '') if report.get('type') == 'Schedule Upload Report' 
-                                    else report.get('companies_assigned', '').replace('\n', ', ')) or 'N/A',
+                'Company/Companies': companies or 'N/A',  # Use processed companies
                 'Tasks': report.get('tasks', 'N/A'),
                 'Challenges': report.get('challenges', 'N/A'),
                 'Solutions': report.get('solutions', 'N/A')
@@ -2118,3 +2161,44 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def load_officer_reports(officer_name):
+    """Load all reports for a specific officer"""
+    reports = []
+    officer_dir = os.path.join(REPORTS_DIR, officer_name)
+    
+    # Check if officer directory exists
+    if not os.path.exists(officer_dir):
+        return reports
+    
+    # Load reports from main officer directory
+    for filename in os.listdir(officer_dir):
+        if filename.endswith('.json'):
+            try:
+                filepath = os.path.join(officer_dir, filename)
+                with open(filepath, 'r') as f:
+                    report_data = json.load(f)
+                    # Ensure officer_name is in the report data
+                    report_data['officer_name'] = officer_name
+                    reports.append(report_data)
+            except Exception as e:
+                st.warning(f"Error reading report {filename}: {str(e)}")
+                continue
+    
+    # Check for reports in the reports subfolder
+    reports_subdir = os.path.join(officer_dir, 'reports')
+    if os.path.exists(reports_subdir):
+        for filename in os.listdir(reports_subdir):
+            if filename.endswith('.json'):
+                try:
+                    filepath = os.path.join(reports_subdir, filename)
+                    with open(filepath, 'r') as f:
+                        report_data = json.load(f)
+                        # Ensure officer_name is in the report data
+                        report_data['officer_name'] = officer_name
+                        reports.append(report_data)
+                except Exception as e:
+                    st.warning(f"Error reading report {filename}: {str(e)}")
+                    continue
+    
+    return reports
