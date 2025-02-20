@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 import pandas as pd
 import shutil
-from io import BytesIO
+from io import BytesIO, StringIO
 import plotly.graph_objects as go
 import time
 
@@ -18,6 +18,8 @@ from task_management_dash import (
     TASK_STATUSES,
     TASK_CATEGORIES
 )
+
+ALLOWED_ATTACHMENT_TYPES = ['png', 'jpg', 'jpeg', 'pdf', 'doc', 'docx', 'xlsx', 'csv']
 
 # Configuration and Constants
 REPORTS_DIR = "officer_reports"
@@ -268,6 +270,8 @@ def report_form():
                 "officer_name": officer_name,
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "company_name": company_name,
+                "total_schedule_files": 0,  # Updated field
+                "total_years": 0,          # New field
                 "tasks": tasks,
                 "challenges": challenges,
                 "solutions": solutions,
@@ -1077,7 +1081,7 @@ def show_summaries():
         
         st.plotly_chart(fig_companies, use_container_width=True)
 
-        # Recent Reports Table
+        # Recent reports table
         st.subheader("Recent Reports")
         if summary['recent_reports']:
             recent_df = pd.DataFrame(summary['recent_reports'])
@@ -1407,7 +1411,7 @@ def submit_report():
     ]
     
     # Form inputs
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns([1.5, 1.5, 1])
     with col1:
         selected_date = st.date_input(
             "Report Date",
@@ -1416,7 +1420,10 @@ def submit_report():
         )
     
     with col2:
-        report_type = st.selectbox("Report Type", REPORT_TYPES)
+        report_category = st.selectbox("Report Type", ["Schedule Upload Report", "Global Deposit Assigning"])
+    
+    with col3:
+        report_frequency = st.selectbox("Frequency", ["Daily", "Weekly", "Monthly"])
     
     # Officer selection with option to add new
     officer_name = st.selectbox(
@@ -1434,12 +1441,53 @@ def submit_report():
                 os.makedirs(officer_dir)
                 st.success(f"Created new officer folder for {new_officer}")
     
-    company_name = st.text_input("Company Name")
+    # Dynamic fields based on report type
+    col1, col2, col3 = st.columns([3, 2, 3])  # Adjusted column ratios
+    
+    if report_category == "Schedule Upload Report":
+        with col1:
+            company_name = st.text_input("Company Name")
+        with col2:
+            total_files = st.number_input("Total Schedule Files", min_value=0, value=0, step=1)
+        with col3:
+            total_years = st.number_input("Total Years", min_value=0, value=0, step=1)
+            st.markdown("""
+                <div style='padding: 10px; color: #00FF00;'>
+                <i>Please specify the total schedule files you have successfully completed for this company and the total number of years for these schedule</i>
+                </div>
+            """, unsafe_allow_html=True)
+    else:  # Global Deposit Assigning
+        with col1:
+            companies_assigned = st.text_area(
+                "List Companies Assigned",
+                height=150,  # Same height as Tasks field
+                key="companies_text_area",
+                placeholder=(
+                    "Example:\n"
+                    "Company A\n"
+                    "Company B\n"
+                    "Company C"
+                )
+            )
+        with col2:
+            total_companies = st.number_input(
+                "Total Number of Companies Assigned", 
+                min_value=0, 
+                value=0, 
+                step=1
+            )
+        with col3:
+            st.markdown("""
+                <div style='padding: 10px; color: #00FF00;'>
+                <i>Please list each company on a new line. The total should match the number of companies assigned.</i>
+                </div>
+            """, unsafe_allow_html=True)
+    
     tasks = st.text_area("Tasks Completed")
     challenges = st.text_area("Challenges Encountered")
     solutions = st.text_area("Proposed Solutions")
     
-    # File upload
+    # File upload with proper handling
     uploaded_files = st.file_uploader(
         "Attach Files",
         accept_multiple_files=True,
@@ -1465,17 +1513,30 @@ def submit_report():
                             f.write(file.getbuffer())
                         attachment_paths.append(file_path)
                 
-                # Create report data
+                # Create report data based on report type
                 report_data = {
-                    "type": report_type,
+                    "type": report_category,
+                    "frequency": report_frequency,
                     "date": selected_date.strftime("%Y-%m-%d"),
                     "officer_name": officer_name,
-                    "company_name": company_name,
                     "tasks": tasks,
                     "challenges": challenges,
                     "solutions": solutions,
                     "attachments": attachment_paths
                 }
+                
+                # Add type-specific fields
+                if report_category == "Schedule Upload Report":
+                    report_data.update({
+                        "company_name": company_name,
+                        "total_schedule_files": total_files,
+                        "total_years": total_years
+                    })
+                else:
+                    report_data.update({
+                        "companies_assigned": companies_assigned,
+                        "total_companies": total_companies
+                    })
                 
                 # Save the report
                 save_report(officer_name, report_data)
@@ -1513,7 +1574,7 @@ def show_report_type_distribution():
                         all_reports.append(report_data)
                 except Exception as e:
                     continue
-
+    
     # Count report types
     report_types = {
         'Daily': 0,
@@ -1586,6 +1647,444 @@ def link_task_to_report(task_id, report_id):
         task_data['linked_report'] = report_id
         with open(task_path, 'w') as f:
             json.dump(task_data, f, indent=4)
+
+def show_analytics_dashboard():
+    """Display analytics dashboard with metrics for both report types"""
+    st.header("Analytics Dashboard")
+    
+    # Get all reports
+    all_reports = []
+    officer_folders = [
+        d for d in os.listdir(REPORTS_DIR) 
+        if os.path.isdir(os.path.join(REPORTS_DIR, d))
+        and d not in ADDITIONAL_FOLDERS
+    ]
+    
+    for officer in officer_folders:
+        officer_reports = load_reports(officer)
+        all_reports.extend(officer_reports)
+    
+    # Separate reports by type
+    schedule_reports = [r for r in all_reports if r.get('type') == "Schedule Upload Report"]
+    global_deposit_reports = [r for r in all_reports if r.get('type') == "Global Deposit Assigning"]
+    
+    # Top-level metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Reports", len(all_reports))
+    with col2:
+        st.metric("Schedule Upload Reports", len(schedule_reports))
+    with col3:
+        st.metric("Global Deposit Reports", len(global_deposit_reports))
+    with col4:
+        st.metric("Active Officers", len(officer_folders))
+    
+    # Schedule Upload Metrics
+    st.subheader("Schedule Upload Analytics")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        total_files = sum(r.get('total_schedule_files', 0) for r in schedule_reports)
+        st.metric("Total Schedule Files Processed", total_files)
+    with col2:
+        total_years = sum(r.get('total_years', 0) for r in schedule_reports)
+        st.metric("Total Years Processed", total_years)
+    with col3:
+        avg_files = total_files / len(schedule_reports) if schedule_reports else 0
+        st.metric("Average Files per Report", f"{avg_files:.1f}")
+    
+    # Global Deposit Metrics
+    st.subheader("Global Deposit Analytics")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        total_companies = sum(r.get('total_companies', 0) for r in global_deposit_reports)
+        st.metric("Total Companies Assigned", total_companies)
+    with col2:
+        avg_companies = total_companies / len(global_deposit_reports) if global_deposit_reports else 0
+        st.metric("Average Companies per Report", f"{avg_companies:.1f}")
+    with col3:
+        unique_companies = set()
+        for report in global_deposit_reports:
+            companies = report.get('companies_assigned', '').split('\n')
+            unique_companies.update(c.strip() for c in companies if c.strip())
+        st.metric("Unique Companies", len(unique_companies))
+    
+    # Frequency Distribution
+    st.subheader("Report Frequency Distribution")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        freq_data = {
+            "Daily": len([r for r in all_reports if r.get('frequency') == "Daily"]),
+            "Weekly": len([r for r in all_reports if r.get('frequency') == "Weekly"]),
+            "Monthly": len([r for r in all_reports if r.get('frequency') == "Monthly"])
+        }
+        
+        # Create frequency chart
+        fig = go.Figure(data=[
+            go.Bar(
+                x=list(freq_data.keys()),
+                y=list(freq_data.values()),
+                marker_color=['#1f77b4', '#ff7f0e', '#2ca02c']
+            )
+        ])
+        fig.update_layout(
+            title="Reports by Frequency",
+            xaxis_title="Frequency",
+            yaxis_title="Number of Reports",
+            showlegend=False
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Report type distribution
+        type_data = {
+            "Schedule Upload": len(schedule_reports),
+            "Global Deposit": len(global_deposit_reports)
+        }
+        
+        fig = go.Figure(data=[
+            go.Pie(
+                labels=list(type_data.keys()),
+                values=list(type_data.values()),
+                marker_colors=['#1f77b4', '#ff7f0e']
+            )
+        ])
+        fig.update_layout(
+            title="Report Type Distribution",
+            showlegend=True
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Time series analysis
+    st.subheader("Activity Timeline")
+    
+    # Prepare timeline data
+    timeline_data = {}
+    for report in all_reports:
+        date = report.get('date')
+        if date:
+            if date not in timeline_data:
+                timeline_data[date] = {'Schedule Upload': 0, 'Global Deposit': 0}
+            timeline_data[date][report.get('type')] += 1
+    
+    dates = sorted(timeline_data.keys())
+    schedule_counts = [timeline_data[date]['Schedule Upload Report'] for date in dates]
+    global_counts = [timeline_data[date]['Global Deposit Assigning'] for date in dates]
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=schedule_counts,
+        name='Schedule Upload',
+        mode='lines+markers'
+    ))
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=global_counts,
+        name='Global Deposit',
+        mode='lines+markers'
+    ))
+    
+    fig.update_layout(
+        title="Reports Over Time",
+        xaxis_title="Date",
+        yaxis_title="Number of Reports",
+        hovermode='x unified'
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+def show_data_table():
+    """Display all reports in a data table format with export options"""
+    st.header("Data Table")
+    
+    # Get all reports
+    reports_data = []
+    for officer_folder in os.listdir(REPORTS_DIR):
+        if os.path.isdir(os.path.join(REPORTS_DIR, officer_folder)) and officer_folder not in ADDITIONAL_FOLDERS:
+            officer_reports = load_officer_reports(officer_folder)
+            reports_data.extend(officer_reports)
+    
+    if reports_data:
+        # Convert reports to DataFrame
+        df_data = []
+        for report in reports_data:
+            row = {
+                'Date': report.get('date', 'N/A'),
+                'Officer': report.get('officer_name', 'N/A'),
+                'Report Type': report.get('type', 'N/A'),
+                'Frequency': report.get('frequency', 'N/A'),
+                'Company/Companies': (report.get('company_name', '') if report.get('type') == 'Schedule Upload Report' 
+                                    else report.get('companies_assigned', '').replace('\n', ', ')) or 'N/A',
+                'Tasks': report.get('tasks', 'N/A'),
+                'Challenges': report.get('challenges', 'N/A'),
+                'Solutions': report.get('solutions', 'N/A')
+            }
+            df_data.append(row)
+        
+        df = pd.DataFrame(df_data)
+        
+        # Export buttons at the top
+        st.write("Export Options:")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Excel export
+            excel_buffer = BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                df.to_excel(writer, sheet_name='Reports', index=False)
+            excel_buffer.seek(0)
+            
+            st.download_button(
+                label="📊 Export to Excel",
+                data=excel_buffer.getvalue(),
+                file_name=f"reports_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        with col2:
+            # CSV export
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📄 Export to CSV",
+                data=csv,
+                file_name=f"reports_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        
+        with col3:
+            # PDF export
+            try:
+                from reportlab.lib import colors
+                from reportlab.lib.pagesizes import letter, landscape
+                from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+                from reportlab.lib.pagesizes import inch
+                
+                pdf_buffer = BytesIO()
+                doc = SimpleDocTemplate(
+                    pdf_buffer,
+                    pagesize=landscape(letter)
+                )
+                
+                # Convert DataFrame to list of lists
+                data = [df.columns.tolist()] + df.values.tolist()
+                
+                # Create table
+                table = Table(data)
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 14),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 12),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                
+                # Build PDF
+                elements = []
+                elements.append(table)
+                doc.build(elements)
+                
+                pdf_data = pdf_buffer.getvalue()
+                st.download_button(
+                    label="📑 Export to PDF",
+                    data=pdf_data,
+                    file_name=f"reports_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"PDF generation failed: {str(e)}")
+        
+        # Display table
+        st.dataframe(
+            df,
+            column_config={
+                "Date": st.column_config.DateColumn("Date"),
+                "Officer": st.column_config.TextColumn("Officer"),
+                "Report Type": st.column_config.TextColumn(
+                    "Report Type",
+                    help="Schedule Upload Report or Global Deposit Assigning"
+                ),
+                "Frequency": st.column_config.TextColumn(
+                    "Frequency",
+                    help="Daily, Weekly, or Monthly"
+                ),
+                "Company/Companies": st.column_config.TextColumn(
+                    "Company/Companies",
+                    width="large",
+                    help="Shows company name for Schedule Upload or list of companies for Global Deposit"
+                ),
+                "Tasks": st.column_config.TextColumn("Tasks", width="large"),
+                "Challenges": st.column_config.TextColumn("Challenges", width="large"),
+                "Solutions": st.column_config.TextColumn("Solutions", width="large")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No data available in the table.")
+
+def search_reports():
+    """Search reports functionality"""
+    st.header("Search Reports")
+    
+    # Get list of officers
+    officer_folders = [
+        d for d in os.listdir(REPORTS_DIR) 
+        if os.path.isdir(os.path.join(REPORTS_DIR, d))
+        and d not in ADDITIONAL_FOLDERS
+    ]
+    
+    # Search filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        search_officer = st.selectbox("Select Officer", ["All Officers"] + sorted(officer_folders))
+    with col2:
+        search_type = st.selectbox("Report Type", ["All Types", "Schedule Upload Report", "Global Deposit Assigning"])
+    with col3:
+        search_frequency = st.selectbox("Frequency", ["All", "Daily", "Weekly", "Monthly"])
+    
+    search_term = st.text_input("Search Term (searches in tasks, challenges, and solutions)")
+    
+    # Date range filter
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", value=None)
+    with col2:
+        end_date = st.date_input("End Date", value=None)
+    
+    # Search button
+    if st.button("Search Reports"):
+        found_reports = []
+        
+        # Collect all matching reports
+        for officer in officer_folders:
+            if search_officer == "All Officers" or search_officer == officer:
+                officer_reports = load_reports(officer)
+                
+                # Filter reports based on criteria
+                for report in officer_reports:
+                    # Type filter
+                    if search_type != "All Types" and report.get('type') != search_type:
+                        continue
+                        
+                    # Frequency filter
+                    if search_frequency != "All" and report.get('frequency') != search_frequency:
+                        continue
+                    
+                    # Date range filter
+                    report_date = datetime.strptime(report.get('date', ''), '%Y-%m-%d').date()
+                    if start_date and report_date < start_date:
+                        continue
+                    if end_date and report_date > end_date:
+                        continue
+                    
+                    # Search term filter
+                    if search_term:
+                        search_term_lower = search_term.lower()
+                        text_to_search = ' '.join([
+                            str(report.get('tasks', '')),
+                            str(report.get('challenges', '')),
+                            str(report.get('solutions', '')),
+                            str(report.get('company_name', '')),
+                            str(report.get('companies_assigned', ''))
+                        ]).lower()
+                        
+                        if search_term_lower not in text_to_search:
+                            continue
+                    
+                    found_reports.append(report)
+        
+        # Display results
+        if found_reports:
+            st.success(f"Found {len(found_reports)} matching reports")
+            show_found_reports(found_reports)
+        else:
+            st.warning("No reports found matching your criteria")
+
+def show_found_reports(found_reports):
+    """Display found reports in a table format"""
+    if found_reports:
+        # Convert reports to DataFrame with additional columns
+        df_data = []
+        for report in found_reports:
+            row = {
+                'Date': report.get('date', 'N/A'),
+                'Officer': report.get('officer_name', 'N/A'),
+                'Report Type': report.get('type', 'N/A'),
+                'Frequency': report.get('frequency', 'N/A'),
+                'Company/Companies': (report.get('company_name', '') if report.get('type') == 'Schedule Upload Report' 
+                                    else report.get('companies_assigned', '').replace('\n', ', ')) or 'N/A',
+                'Tasks': report.get('tasks', 'N/A'),
+                'Challenges': report.get('challenges', 'N/A'),
+                'Solutions': report.get('solutions', 'N/A')
+            }
+            df_data.append(row)
+        
+        df = pd.DataFrame(df_data)
+        
+        # Display table with updated columns
+        st.dataframe(
+            df,
+            column_config={
+                "Date": st.column_config.DateColumn("Date"),
+                "Officer": st.column_config.TextColumn("Officer"),
+                "Report Type": st.column_config.TextColumn(
+                    "Report Type",
+                    help="Schedule Upload Report or Global Deposit Assigning"
+                ),
+                "Frequency": st.column_config.TextColumn(
+                    "Frequency",
+                    help="Daily, Weekly, or Monthly"
+                ),
+                "Company/Companies": st.column_config.TextColumn(
+                    "Company/Companies",
+                    width="large",
+                    help="Shows company name for Schedule Upload or list of companies for Global Deposit"
+                ),
+                "Tasks": st.column_config.TextColumn("Tasks", width="large"),
+                "Challenges": st.column_config.TextColumn("Challenges", width="large"),
+                "Solutions": st.column_config.TextColumn("Solutions", width="large")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # Export options
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Export to Excel"):
+                excel_buffer = BytesIO()
+                df.to_excel(excel_buffer, index=False)
+                excel_buffer.seek(0)
+                st.download_button(
+                    "Download Excel",
+                    data=excel_buffer,
+                    file_name=f"found_reports_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        
+        with col2:
+            if st.button("Export to CSV"):
+                csv_buffer = BytesIO()
+                df.to_csv(csv_buffer, index=False)
+                csv_buffer.seek(0)
+                st.download_button(
+                    "Download CSV",
+                    data=csv_buffer.getvalue(),
+                    file_name=f"found_reports_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+    else:
+        st.info("No reports found.")
 
 def main():
     """Main function to run the application"""
