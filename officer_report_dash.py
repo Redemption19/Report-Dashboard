@@ -2052,20 +2052,23 @@ def show_found_reports(found_reports):
         # Convert reports to DataFrame with additional columns
         df_data = []
         for report in found_reports:
-            # Fix company/companies display logic
+            # Handle company display logic
             if report.get('type') == 'Global Deposit Assigning':
-                companies = report.get('companies_assigned', '').strip()
-                # Convert multiline companies to comma-separated string
-                companies = ', '.join(filter(None, companies.split('\n')))
+                company_name = report.get('company_name', 'N/A')
+                companies_assigned = report.get('companies_assigned', '').strip()
+                companies_list = [c.strip() for c in companies_assigned.split('\n') if c.strip()]
+                companies_assigned_display = ', '.join(companies_list) if companies_list else 'N/A'
             else:
-                companies = report.get('company_name', '')
+                company_name = report.get('company_name', 'N/A')
+                companies_assigned_display = 'N/A'
 
             row = {
                 'Date': report.get('date', 'N/A'),
                 'Officer': report.get('officer_name', 'N/A'),
                 'Report Type': report.get('type', 'N/A'),
                 'Frequency': report.get('frequency', 'N/A'),
-                'Company/Companies': companies or 'N/A',  # Use processed companies
+                'Company': company_name,
+                'Companies Assigned': companies_assigned_display,
                 'Tasks': report.get('tasks', 'N/A'),
                 'Challenges': report.get('challenges', 'N/A'),
                 'Solutions': report.get('solutions', 'N/A')
@@ -2088,10 +2091,15 @@ def show_found_reports(found_reports):
                     "Frequency",
                     help="Daily, Weekly, or Monthly"
                 ),
-                "Company/Companies": st.column_config.TextColumn(
-                    "Company/Companies",
+                "Company": st.column_config.TextColumn(
+                    "Company",
+                    width="medium",
+                    help="Primary company name"
+                ),
+                "Companies Assigned": st.column_config.TextColumn(
+                    "Companies Assigned",
                     width="large",
-                    help="Shows company name for Schedule Upload or list of companies for Global Deposit"
+                    help="List of companies assigned (for Global Deposit reports)"
                 ),
                 "Tasks": st.column_config.TextColumn("Tasks", width="large"),
                 "Challenges": st.column_config.TextColumn("Challenges", width="large"),
@@ -2100,32 +2108,6 @@ def show_found_reports(found_reports):
             hide_index=True,
             use_container_width=True
         )
-        
-        # Export options
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Export to Excel"):
-                excel_buffer = BytesIO()
-                df.to_excel(excel_buffer, index=False)
-                excel_buffer.seek(0)
-                st.download_button(
-                    "Download Excel",
-                    data=excel_buffer,
-                    file_name=f"found_reports_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-        
-        with col2:
-            if st.button("Export to CSV"):
-                csv_buffer = BytesIO()
-                df.to_csv(csv_buffer, index=False)
-                csv_buffer.seek(0)
-                st.download_button(
-                    "Download CSV",
-                    data=csv_buffer.getvalue(),
-                    file_name=f"found_reports_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
     else:
         st.info("No reports found.")
 
