@@ -2,4 +2,6 @@ streamlit
 pandas
 plotly
 xlsxwriter
-wordcloud 
+wordcloud
+reportlab
+openpyxl
