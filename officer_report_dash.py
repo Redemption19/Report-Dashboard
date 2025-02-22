@@ -1914,28 +1914,67 @@ def show_summaries():
                 if report.get('solutions'):
                     st.write(f"**Solutions:** {report.get('solutions')}")
 
-    # 5. Alerts Tab
+       # 5. Alerts Tab
     with alerts_tab:
         st.subheader("Notifications & Alerts")
         
-        # Check for pending reviews
-        pending = [r for r in reports_data if r.get('status') == 'Pending Review']
-        if pending:
-            st.warning(f"{len(pending)} reports pending review")
-            
-        # Check for inactive officers (no reports in last 7 days)
+        # Get current date
         today = datetime.now()
-        for officer in officers:
-            last_report = max([
-                datetime.strptime(r.get('date', '1900-01-01'), '%Y-%m-%d')
-                for r in reports_data
-                if r.get('officer_name') == officer
-            ], default=None)
-            
-            if last_report and (today - last_report).days > 7:
-                st.warning(f"⚠️ {officer} hasn't submitted a report in {(today - last_report).days} days")
-    with review_tab:
-        review_reports()
+        
+        # Create columns for different alert types
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Reports needing attention
+            attention_reports = [r for r in reports_data if r.get('status') == 'Needs Attention']
+            with st.container(border=True):
+                st.markdown("### ⚠️ Needs Attention")
+                if attention_reports:
+                    for report in attention_reports[:3]:  # Show top 3
+                        st.warning(
+                            f"**{report.get('officer_name', 'Unknown Officer')}** - {report.get('date', 'No date')}\n\n"
+                            f"Type: {report.get('type', 'Unknown Type')}"
+                        )
+                    if len(attention_reports) > 3:
+                        st.info(f"+ {len(attention_reports) - 3} more reports need attention")
+                else:
+                    st.success("No reports need attention")
+        
+        with col2:
+            # Check for pending reviews
+            pending = [r for r in reports_data if r.get('status') == 'Pending Review']
+            with st.container(border=True):
+                st.markdown("### 🕒 Pending Review")
+                if pending:
+                    st.warning(f"{len(pending)} reports pending review")
+                    for report in pending[:3]:  # Show top 3
+                        st.info(
+                            f"**{report.get('officer_name', 'Unknown Officer')}** - {report.get('date', 'No date')}\n\n"
+                            f"Type: {report.get('type', 'Unknown Type')}"
+                        )
+                    if len(pending) > 3:
+                        st.info(f"+ {len(pending) - 3} more reports pending review")
+                else:
+                    st.success("No pending reviews")
+        
+        with col3:
+            # Check for inactive officers
+            with st.container(border=True):
+                st.markdown("### 👤 Inactive Officers")
+                inactive_found = False
+                for officer in officers:
+                    last_report = max([
+                        datetime.strptime(r.get('date', '1900-01-01'), '%Y-%m-%d')
+                        for r in reports_data
+                        if r.get('officer_name') == officer
+                    ], default=None)
+                    
+                    if last_report and (today - last_report).days > 7:
+                        inactive_found = True
+                        st.warning(f"⚠️ {officer} hasn't submitted a report in {(today - last_report).days} days")
+                
+                if not inactive_found:
+                    st.success("All officers are active")
 
 def create_dashboard():
     """Create interactive dashboard with report analytics"""
