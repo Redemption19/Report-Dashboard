@@ -3593,6 +3593,14 @@ def show_found_reports(found_reports):
             } for r in global_reports])
 
             # Sort DataFrame
+                        # Add sort order selection
+            sort_order = st.selectbox(
+                "Sort by Date",
+                ["Newest First", "Oldest First"],
+                key="sort_reports"
+            )
+
+            # Convert and sort DataFrame
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values('Date', ascending=(sort_order == "Oldest First"))
 
