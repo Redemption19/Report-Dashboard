@@ -14,6 +14,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from wordcloud import WordCloud
+from reportlab.lib.units import inch
 
 
 # Add these imports at the top of your file
@@ -2502,30 +2503,58 @@ def create_dashboard():
             from reportlab.lib import colors
             from reportlab.lib.pagesizes import letter, landscape
             from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+            from reportlab.lib.units import inch
             
             pdf_buffer = BytesIO()
             doc = SimpleDocTemplate(
                 pdf_buffer,
-                pagesize=landscape(letter)
+                pagesize=landscape(letter),
+                rightMargin=30,
+                leftMargin=30,
+                topMargin=30,
+                bottomMargin=30
             )
             elements = []
             
-            # Convert DataFrame to list of lists for PDF table
-            data = [df.columns.values.tolist()] + df.values.tolist()
-            table = Table(data)
+            # Prepare data for PDF table - convert all values to strings
+            pdf_data = []
+            # Add headers
+            pdf_data.append([str(col) for col in df.columns])
+            # Add rows with string conversion
+            for _, row in df.iterrows():
+                pdf_row = []
+                for value in row:
+                    # Convert any non-string values to strings
+                    if value is None:
+                        pdf_row.append('')
+                    elif isinstance(value, (int, float)):
+                        pdf_row.append(str(value))
+                    else:
+                        # Limit text length to prevent overflow
+                        text = str(value)
+                        if len(text) > 100:
+                            text = text[:97] + '...'
+                        pdf_row.append(text)
+                pdf_data.append(pdf_row)
+            
+            # Create table with wrapped text
+            table = Table(pdf_data, repeatRows=1)
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.blue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 14),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
                 ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 12),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('WORDWRAP', (0, 0), (-1, -1), True),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
+            
             elements.append(table)
             doc.build(elements)
             
@@ -2592,336 +2621,6 @@ def create_dashboard():
         hide_index=True,
         use_container_width=True
     )
-
-# def create_dashboard():
-#     """Create interactive dashboard with report analytics"""
-#     st.header("Dashboard Analytics")
-    
-#     # Load all reports
-#     all_officers = [d for d in os.listdir(REPORTS_DIR) 
-#                    if os.path.isdir(os.path.join(REPORTS_DIR, d)) 
-#                    and d not in ADDITIONAL_FOLDERS]
-    
-#     all_reports = []
-#     for officer in all_officers:
-#         all_reports.extend(load_reports(officer))
-    
-#     if not all_reports:
-#         st.info("No reports available for analysis.")
-#         return
-    
-#     df = pd.DataFrame(all_reports)
-#     df['date'] = pd.to_datetime(df['date'])
-    
-#     # Summary Statistics Cards
-#     col1, col2, col3, col4 = st.columns(4)
-#     with col1:
-#         st.metric("Total Reports", len(df))
-#     with col2:
-#         st.metric("Active Officers", len(df['officer_name'].unique()))
-#     with col3:
-#         st.metric("Companies Covered", len(df['company_name'].unique()))
-#     with col4:
-#         st.metric("Reports This Month", 
-#                  len(df[df['date'].dt.month == datetime.now().month]))
-
-#     # Two columns for charts
-#     col1, col2 = st.columns(2)
-    
-#     with col1:
-#         # Pie Chart: Report Types Distribution
-#         st.subheader("Report Types Distribution")
-#         report_types = df['type'].value_counts()
-#         fig_pie = {
-#             'data': [{
-#                 'type': 'pie',
-#                 'labels': report_types.index,
-#                 'values': report_types.values,
-#                 'hole': 0.4,  # Makes it a donut chart
-#             }],
-#             'layout': {'height': 400}
-#         }
-#         st.plotly_chart(fig_pie, use_container_width=True)
-    
-#     with col2:
-#         # Bar Chart: Top Companies
-#         st.subheader("Top Companies by Report Count")
-#         top_companies = df['company_name'].value_counts().head(10)
-#         fig_companies = {
-#             'data': [{
-#                 'type': 'bar',
-#                 'x': top_companies.index,
-#                 'y': top_companies.values,
-#                 'marker': {'color': 'lightblue'},
-#             }],
-#             'layout': {
-#                 'height': 400,
-#                 'xaxis': {'tickangle': 45},
-#             }
-#         }
-#         st.plotly_chart(fig_companies, use_container_width=True)
-    
-#     # Timeline of Reports
-#     st.subheader("Reports Timeline")
-#     timeline = df.groupby('date').size().reset_index(name='count')
-#     fig_timeline = {
-#         'data': [{
-#             'type': 'scatter',
-#             'x': timeline['date'],
-#             'y': timeline['count'],
-#             'mode': 'lines+markers',
-#             'line': {'color': 'blue'},
-#         }],
-#         'layout': {'height': 300}
-#     }
-#     st.plotly_chart(fig_timeline, use_container_width=True)
-    
-#     # Two columns for more charts
-#     col1, col2 = st.columns(2)
-    
-#     with col1:
-#         # Bar Chart: Top Companies by Report Count
-#         st.subheader("Top Companies by Report Count")
-#         company_counts = {}
-#         for report in all_reports:
-#             company = report.get('company_name', 'Unknown')
-#             company_counts[company] = company_counts.get(company, 0) + 1
-        
-#         # Sort and get top 10 companies
-#         top_companies = dict(sorted(company_counts.items(), key=lambda x: x[1], reverse=True)[:10])
-        
-#         fig_companies = go.Figure(data=[
-#             go.Bar(
-#                 x=list(top_companies.keys()),
-#                 y=list(top_companies.values()),
-#                 marker_color='#3498db'
-#             )
-#         ])
-#         fig_companies.update_layout(
-#             title="Top Companies by Report Count",
-#             xaxis_title="Company",
-#             yaxis_title="Number of Reports",
-#             xaxis_tickangle=-45,
-#             height=400,
-#             paper_bgcolor='rgba(0,0,0,0)',
-#             plot_bgcolor='rgba(0,0,0,0)',
-#             font=dict(color='white')
-#         )
-#         st.plotly_chart(fig_companies, use_container_width=True)
-    
-#     with col2:
-#         # Pie Chart: Officer Workload Distribution
-#         st.subheader("Officer Workload Distribution")
-#         officer_counts = {}
-#         for report in all_reports:
-#             officer = report.get('officer_name', 'Unknown')
-#             officer_counts[officer] = officer_counts.get(officer, 0) + 1
-        
-#         fig_officer = go.Figure(data=[
-#             go.Pie(
-#                 labels=list(officer_counts.keys()),
-#                 values=list(officer_counts.values()),
-#                 hole=.3,
-#                 marker_colors=['#2ecc71', '#3498db', '#9b59b6', '#f1c40f', '#e74c3c']
-#             )
-#         ])
-#         fig_officer.update_layout(
-#             title="Officer Workload Distribution",
-#             height=400,
-#             paper_bgcolor='rgba(0,0,0,0)',
-#             plot_bgcolor='rgba(0,0,0,0)',
-#             font=dict(color='white')
-#         )
-#         st.plotly_chart(fig_officer, use_container_width=True)
-
-#     # Reports by Day of Week
-#     st.subheader("Reports by Day of Week")
-#     day_counts = {day: 0 for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']}
-    
-#     for report in all_reports:
-#         try:
-#             report_date = datetime.strptime(report.get('date', ''), '%Y-%m-%d')
-#             day_name = report_date.strftime('%A')
-#             day_counts[day_name] += 1
-#         except (ValueError, KeyError) as e:
-#             continue
-    
-#     fig_days = go.Figure(data=[
-#         go.Bar(
-#             x=list(day_counts.keys()),
-#             y=list(day_counts.values()),
-#             marker_color='#2ecc71'
-#         )
-#     ])
-#     fig_days.update_layout(
-#         title="Reports by Day of Week",
-#         xaxis_title="Day of Week",
-#         yaxis_title="Number of Reports",
-#         height=300,
-#         paper_bgcolor='rgba(0,0,0,0)',
-#         plot_bgcolor='rgba(0,0,0,0)',
-#         font=dict(color='white')
-#     )
-#     st.plotly_chart(fig_days, use_container_width=True)
-
-#     # Data Table with Export Options
-#     st.subheader("Report Data Table")
-    
-#     # Create DataFrame for the table
-#     df_data = []
-#     for report in all_reports:
-#         # Get companies assigned string for Global Deposit reports
-#         companies_assigned = report.get('companies_assigned', '')
-#         if isinstance(companies_assigned, str):
-#             companies_assigned = companies_assigned.strip().replace('\n', ', ')
-        
-#         row = {
-#             'Date': report.get('date', 'N/A'),
-#             'Officer': report.get('officer_name', 'Unknown'),
-#             'Type': report.get('type', 'N/A'),
-#             'Frequency': report.get('frequency', 'N/A'),
-#             'Company': report.get('company_name', 'N/A'),
-#             'Total Years': report.get('total_years', 'N/A'),  # For Schedule Upload
-#             'Companies Assigned': companies_assigned,  # For Global Deposit
-#             'Total Companies': report.get('total_companies', 'N/A'),  # For Global Deposit
-#             'Tasks': report.get('tasks', 'N/A')[:100] + '...' if len(report.get('tasks', 'N/A')) > 100 else report.get('tasks', 'N/A'),
-#             'Challenges': report.get('challenges', 'N/A')[:100] + '...' if len(report.get('challenges', 'N/A')) > 100 else report.get('challenges', 'N/A'),
-#             'Solutions': report.get('solutions', 'N/A')[:100] + '...' if len(report.get('solutions', 'N/A')) > 100 else report.get('solutions', 'N/A'),
-#         }
-#         df_data.append(row)
-    
-#     df = pd.DataFrame(df_data)
-    
-#     # Export buttons
-#     st.write("Export Options:")
-#     col1, col2, col3 = st.columns([1, 1, 1])
-    
-#     with col1:
-#         # Excel export
-#         buffer = BytesIO()
-#         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-#             df.to_excel(writer, sheet_name='Reports', index=False)
-#             workbook = writer.book
-#             worksheet = writer.sheets['Reports']
-#             header_format = workbook.add_format({
-#                 'bold': True,
-#                 'bg_color': '#0066cc',
-#                 'font_color': 'white'
-#             })
-#             for col_num, value in enumerate(df.columns.values):
-#                 worksheet.write(0, col_num, value, header_format)
-        
-#         st.download_button(
-#             label="📥 Download Excel",
-#             data=buffer.getvalue(),
-#             file_name=f"reports_{datetime.now().strftime('%Y%m%d')}.xlsx",
-#             mime="application/vnd.ms-excel",
-#             use_container_width=True
-#         )
-
-#     with col2:
-#         # CSV export
-#         csv = df.to_csv(index=False).encode('utf-8')
-#         st.download_button(
-#             label="📄 Download CSV",
-#             data=csv,
-#             file_name=f"reports_{datetime.now().strftime('%Y%m%d')}.csv",
-#             mime="text/csv",
-#             use_container_width=True
-#         )
-
-#     with col3:
-#         # PDF export
-#         try:
-#             from reportlab.lib import colors
-#             from reportlab.lib.pagesizes import letter, landscape
-#             from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-            
-#             pdf_buffer = BytesIO()
-#             doc = SimpleDocTemplate(
-#                 pdf_buffer,
-#                 pagesize=landscape(letter)
-#             )
-#             elements = []
-            
-#             # Convert DataFrame to list of lists for PDF table
-#             data = [df.columns.values.tolist()] + df.values.tolist()
-#             table = Table(data)
-#             table.setStyle(TableStyle([
-#                 ('BACKGROUND', (0, 0), (-1, 0), colors.blue),
-#                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-#                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-#                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-#                 ('FONTSIZE', (0, 0), (-1, 0), 14),
-#                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-#                 ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-#                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-#                 ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-#                 ('FONTSIZE', (0, 1), (-1, -1), 12),
-#                 ('GRID', (0, 0), (-1, -1), 1, colors.black)
-#             ]))
-#             elements.append(table)
-#             doc.build(elements)
-            
-#             st.download_button(
-#                 label="📑 Download PDF",
-#                 data=pdf_buffer.getvalue(),
-#                 file_name=f"reports_{datetime.now().strftime('%Y%m%d')}.pdf",
-#                 mime="application/pdf",
-#                 use_container_width=True
-#             )
-#         except Exception as e:
-#             st.error(f"Error generating PDF: {str(e)}")
-
-#     # Add a small space between buttons and table
-#     st.write("")
-    
-#     # Display the data table (moved outside of col3)
-#     st.dataframe(
-#         df,
-#         column_config={
-#             "Date": st.column_config.DateColumn("Date"),
-#             "Officer": st.column_config.TextColumn("Officer"),
-#             "Type": st.column_config.TextColumn(
-#                 "Report Type",
-#                 help="Schedule Upload Report or Global Deposit Assigning"
-#             ),
-#             "Frequency": st.column_config.TextColumn(
-#                 "Frequency",
-#                 help="Daily, Weekly, or Monthly"
-#             ),
-#             "Company": st.column_config.TextColumn(
-#                 "Company",
-#                 width="medium"
-#             ),
-#             "Total Years": st.column_config.NumberColumn(
-#                 "Total Years",
-#                 width="small"
-#             ),
-#             "Companies Assigned": st.column_config.TextColumn(
-#                 "Companies Assigned",
-#                 width="large"
-#             ),
-#             "Total Companies": st.column_config.NumberColumn(
-#                 "Total Companies",
-#                 width="small"
-#             ),
-#             "Tasks": st.column_config.TextColumn(
-#                 "Tasks",
-#                 width="large"
-#             ),
-#             "Challenges": st.column_config.TextColumn(
-#                 "Challenges",
-#                 width="large"
-#             ),
-#             "Solutions": st.column_config.TextColumn(
-#                 "Solutions",
-#                 width="large"
-#             )
-#         },
-#         hide_index=True,
-#         use_container_width=True
-#     )
 
 def show_detailed_analysis():
     """Show detailed analysis with updated report fields and error handling"""
