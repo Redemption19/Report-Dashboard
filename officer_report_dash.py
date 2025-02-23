@@ -15,6 +15,20 @@ from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from wordcloud import WordCloud
 from reportlab.lib.units import inch
+from supabase_config import save_report_to_supabase
+from supabase_config import (
+    save_report_to_supabase, 
+    check_supabase_data, 
+    sync_local_to_supabase
+)
+
+from supabase_config import (
+    save_report_to_supabase,
+    check_supabase_data,
+    auto_backup_to_supabase,
+    restore_from_supabase,
+    schedule_auto_backup
+)
 
 
 # Add these imports at the top of your file
@@ -74,41 +88,56 @@ def init_folders():
 - [Officer Names]: Individual officer report folders are created automatically
 """)
 
+
 def save_report(officer_name, report_data):
-    """Save report to JSON file with status"""
-    # Add default status if not present
-    if 'status' not in report_data:
-        report_data['status'] = 'Pending Review'
-    if 'comments' not in report_data:
-        report_data['comments'] = []
+    """Save report to JSON file with status and Supabase"""
+    try:
+        # Add default status if not present
+        if 'status' not in report_data:
+            report_data['status'] = 'Pending Review'
+        if 'comments' not in report_data:
+            report_data['comments'] = []
+            
+        # Create main officer directory if it doesn't exist
+        officer_dir = os.path.join(REPORTS_DIR, officer_name)
+        if not os.path.exists(officer_dir):
+            os.makedirs(officer_dir)
         
-    # Create main officer directory if it doesn't exist
-    officer_dir = os.path.join(REPORTS_DIR, officer_name)
-    if not os.path.exists(officer_dir):
-        os.makedirs(officer_dir)
-    
-    # Format the date properly for both filename and JSON
-    report_date = report_data['date']
-    if hasattr(report_date, 'strftime'):  # Handle datetime or Timestamp objects
-        formatted_date = report_date.strftime("%Y-%m-%d")
-        report_data['date'] = formatted_date  # Update the date in report_data
-    elif isinstance(report_date, str):
-        formatted_date = report_date.split()[0]  # Take just the date part
-    
-    # Create filename with properly formatted date and type
-    report_type = report_data['type'].replace(' ', '_')
-    filename = f"{formatted_date}_{report_type}.json"
-    filepath = os.path.join(officer_dir, filename)
-    
-    # Convert any Timestamp objects in the report data to strings
-    report_data = json.loads(
-        json.dumps(report_data, default=lambda x: x.strftime("%Y-%m-%d") if hasattr(x, 'strftime') else str(x))
-    )
-    
-    # Save the report
-    with open(filepath, 'w') as f:
-        json.dump(report_data, f, indent=4)
-    return filepath
+        # Format the date properly for both filename and JSON
+        report_date = report_data['date']
+        if hasattr(report_date, 'strftime'):  # Handle datetime or Timestamp objects
+            formatted_date = report_date.strftime("%Y-%m-%d")
+            report_data['date'] = formatted_date  # Update the date in report_data
+        elif isinstance(report_date, str):
+            formatted_date = report_date.split()[0]  # Take just the date part
+        
+        # Create filename with properly formatted date and type
+        report_type = report_data['type'].replace(' ', '_')
+        filename = f"{formatted_date}_{report_type}.json"
+        filepath = os.path.join(officer_dir, filename)
+        
+        # Convert any Timestamp objects in the report data to strings
+        report_data = json.loads(
+            json.dumps(report_data, default=lambda x: x.strftime("%Y-%m-%d") if hasattr(x, 'strftime') else str(x))
+        )
+        
+        # Save locally
+        with open(filepath, 'w') as f:
+            json.dump(report_data, f, indent=4)
+            
+        # Save to Supabase
+        supabase_success = save_report_to_supabase(officer_name, report_data)
+        
+        if not supabase_success:
+            st.warning("⚠️ Report saved locally but failed to sync with cloud storage")
+            return filepath
+            
+        st.success("✅ Report saved successfully (local and cloud)")
+        return filepath
+        
+    except Exception as e:
+        st.error(f"❌ Error saving report: {str(e)}")
+        return None
 
 def review_reports():
     """Review pending reports and update their status"""
@@ -1741,13 +1770,14 @@ def show_summaries():
     keyword_search = st.sidebar.text_input("Search by Keywords")
 
     # Create 6 tabs instead of 7 to match your UI
-    overview_tab, breakdown_tab, insights_tab, recent_tab, alerts_tab, review_tab = st.tabs([
+    overview_tab, breakdown_tab, insights_tab, recent_tab, alerts_tab, review_tab, supabase_tab = st.tabs([
         "Overview",
         "Reports Breakdown", 
         "Visual Insights",
         "Recent Reports",
         "Alerts",
-        "Review Reports"
+        "Review Reports",
+        "Supabase Data"
     ])
 
     # 1. Overview Tab
@@ -1975,6 +2005,46 @@ def show_summaries():
                 
                 if not inactive_found:
                     st.success("All officers are active")
+
+        with supabase_tab:
+            st.subheader("Supabase Data Check")
+            col1, col2 = st.columns([1,2])
+            with col1:
+                if st.button("🔄 Refresh Data"):
+                    check_supabase_data()
+            with col2:
+                if st.button("🔄 Sync Local to Supabase"):
+                    sync_local_to_supabase()
+
+            # In your show_summaries function
+    with supabase_tab:
+        st.subheader("Supabase Data Management")
+        
+        # Create three columns for different actions
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔍 Check Data"):
+                check_supabase_data()
+        
+        with col2:
+            if st.button("💾 Backup Now"):
+                auto_backup_to_supabase()
+        
+        with col3:
+            if st.button("📥 Restore Data"):
+                if st.warning("This will overwrite local files. Continue?"):
+                    restore_from_supabase()
+        
+        # Show last backup time
+        if 'last_backup' in st.session_state and st.session_state.last_backup:
+            st.info(f"Last backup: {st.session_state.last_backup.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Auto-backup settings
+        with st.expander("Auto-Backup Settings"):
+            st.write("Automatic backup runs daily when the app is active")
+            if st.button("Force Run Auto-Backup"):
+                schedule_auto_backup()
 
 def create_dashboard():
     """Create interactive dashboard with report analytics"""

@@ -7,6 +7,11 @@ import json
 import os
 import calendar
 from io import BytesIO
+from supabase_config import (
+    save_task_to_supabase,
+    load_tasks_from_supabase,
+    delete_task_from_supabase
+)
 
 # Constants
 TASK_DIR = "tasks"
@@ -33,16 +38,31 @@ def get_officer_names():
         return []
 
 def save_task(task_data):
-    """Save task to JSON file"""
-    task_id = task_data.get('task_id', datetime.now().strftime('%Y%m%d_%H%M%S'))
-    filepath = os.path.join(TASK_DIR, f"task_{task_id}.json")
-    with open(filepath, 'w') as f:
-        json.dump(task_data, f, indent=4)
-    return task_id
+    """Save task to both local storage and Supabase"""
+    try:
+        # Save locally
+        task_id = task_data.get('task_id', datetime.now().strftime('%Y%m%d_%H%M%S'))
+        filepath = os.path.join(TASK_DIR, f"task_{task_id}.json")
+        with open(filepath, 'w') as f:
+            json.dump(task_data, f, indent=4)
+            
+        # Save to Supabase
+        supabase_success = save_task_to_supabase(task_data)
+        
+        if not supabase_success:
+            st.warning("⚠️ Task saved locally but failed to sync with cloud storage")
+        
+        return task_id
+        
+    except Exception as e:
+        st.error(f"Error saving task: {str(e)}")
+        return None
 
 def load_tasks():
-    """Load all tasks from JSON files"""
+    """Load tasks from both local storage and Supabase"""
     tasks = []
+    
+    # Load from local storage
     for filename in os.listdir(TASK_DIR):
         if filename.endswith('.json'):
             try:
@@ -50,8 +70,16 @@ def load_tasks():
                     task = json.load(f)
                     tasks.append(task)
             except Exception as e:
-                st.error(f"Error loading task {filename}: {str(e)}")
-    return tasks
+                st.error(f"Error loading local task {filename}: {str(e)}")
+    
+    # Load from Supabase
+    supabase_tasks = load_tasks_from_supabase()
+    
+    # Merge tasks (Supabase version takes precedence)
+    task_dict = {task['task_id']: task for task in tasks}  # Local tasks
+    task_dict.update({task['task_id']: task for task in supabase_tasks})  # Supabase tasks
+    
+    return list(task_dict.values())
 
 def create_task_dashboard():
     """Create the main task management dashboard"""
@@ -408,7 +436,7 @@ def show_task_list():
             with col2:
                 if st.button("🗑️ Delete", key=f"delete_{task['task_id']}"):
                     try:
-                        os.remove(os.path.join(TASK_DIR, f"task_{task['task_id']}.json"))
+                        delete_task(task['task_id'])
                         st.success("Task deleted successfully!")
                         st.rerun()
                     except Exception as e:
@@ -803,6 +831,26 @@ def show_analytics_reports():
         
         else:  # PDF
             st.warning("PDF export functionality coming soon!")
+
+def delete_task(task_id):
+    """Delete task from both local storage and Supabase"""
+    try:
+        # Delete local file
+        filepath = os.path.join(TASK_DIR, f"task_{task_id}.json")
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        
+        # Delete from Supabase
+        supabase_success = delete_task_from_supabase(task_id)
+        
+        if not supabase_success:
+            st.warning("⚠️ Task deleted locally but failed to delete from cloud storage")
+            
+        return True
+        
+    except Exception as e:
+        st.error(f"Error deleting task: {str(e)}")
+        return False
 
 # Main app
 if __name__ == "__main__":

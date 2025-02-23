@@ -5,3 +5,4 @@ xlsxwriter
 wordcloud
 reportlab
 openpyxl
+supabase==2.0.3
