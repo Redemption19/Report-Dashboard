@@ -2538,14 +2538,11 @@ def create_dashboard():
         else:
             st.info("No reports needing attention")
 
-    # Continue with your existing DataTable and export options...
-
-        # After your review tabs section in the dashboard, add:
     
-    # Data Table Section
+        # Data Table Section
     st.subheader("Report Data Table")
     
-        # Create DataFrame for the table
+    # Create DataFrame for the table
     df_data = []
     for report in all_reports:
         # Get companies assigned string for Global Deposit reports
@@ -2559,21 +2556,36 @@ def create_dashboard():
         else:
             company_name = report.get('company_name', 'N/A')
         
+        # Get the full datetime from submission_date
+        submission_datetime = report.get('submission_date', report.get('date', 'N/A'))
+        if isinstance(submission_datetime, str):
+            try:
+                # Parse the datetime string
+                parsed_datetime = datetime.strptime(submission_datetime, '%Y-%m-%d %H:%M:%S')
+                formatted_datetime = parsed_datetime.strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                formatted_datetime = submission_datetime
+        else:
+            formatted_datetime = submission_datetime
+            
         row = {
-            'Date': report.get('Date', 'N/A'),
-            'Officer': report.get('Officer Name', 'Unknown'),
-            'Type': report.get('Report Type', 'N/A'),
-            'Status': report.get('Status', 'Pending Review'),  # Set default status if not present
-            'Frequency': report.get('Frequency', 'N/A'),
+            'Date': formatted_datetime,
+            'Officer': report.get('officer_name', 'Unknown'),
+            'Type': report.get('type', 'N/A'),
+            'Status': report.get('status', 'Pending Review'),  # Set default status if not present
+            'Frequency': report.get('frequency', 'N/A'),
             'Company': company_name,
-            'Total Years': report.get('Total Years Uploaded', 'N/A'),
+            'Total Years': report.get('total_years', 'N/A'),
             'Companies Assigned': companies_assigned,
-            'Total Companies': report.get('Total Companies Assigned', 'N/A'),
+            'Total Companies': report.get('total_companies', 'N/A'),
             'Tasks': report.get('tasks', 'N/A')[:100] + '...' if len(report.get('tasks', 'N/A')) > 100 else report.get('tasks', 'N/A'),
             'Challenges': report.get('challenges', 'N/A')[:100] + '...' if len(report.get('challenges', 'N/A')) > 100 else report.get('challenges', 'N/A'),
             'Solutions': report.get('solutions', 'N/A')[:100] + '...' if len(report.get('solutions', 'N/A')) > 100 else report.get('solutions', 'N/A'),
         }
         df_data.append(row)
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(df_data)
     
     # Export buttons
     st.write("Export Options:")
@@ -2691,7 +2703,11 @@ def create_dashboard():
     st.dataframe(
         df,
         column_config={
-            "Date": st.column_config.DateColumn("Date"),
+            "Date": st.column_config.DatetimeColumn(
+                "Date & Time",
+                format="YYYY-MM-DD HH:mm:ss",
+                help="Report submission date and time"
+            ),
             "Officer": st.column_config.TextColumn("Officer"),
             "Type": st.column_config.TextColumn(
                 "Report Type",
@@ -2737,7 +2753,6 @@ def create_dashboard():
         hide_index=True,
         use_container_width=True
     )
-
 def show_detailed_analysis():
     """Show detailed analysis with updated report fields and error handling"""
     st.subheader("Detailed Analysis")
