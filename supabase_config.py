@@ -36,6 +36,10 @@ def save_report_to_supabase(officer_name, report_data):
         else:
             formatted_date = str(report_date)
         
+        # Format the submission date with exact time
+        submission_datetime = datetime.now()
+        formatted_submission_time = submission_datetime.strftime("%Y-%m-%d %H:%M:%S")
+        
         # Initialize Supabase client
         supabase = init_supabase()
         if not supabase:
@@ -55,6 +59,7 @@ def save_report_to_supabase(officer_name, report_data):
             'id': str(report_data['id']),
             'officer_name': str(officer_name),
             'date': formatted_date,
+            'submission_time': formatted_submission_time,  # Add exact submission time
             'type': str(report_data['type']),
             'status': str(report_data.get('status', 'Pending Review')),
             'company_name': str(report_data.get('company_name', '')) if report_data.get('company_name') else None,
