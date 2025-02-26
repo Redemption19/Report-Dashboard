@@ -31,39 +31,50 @@ def save_report_to_supabase(officer_name, report_data):
         report_date = report_data['date']
         if hasattr(report_date, 'strftime'):
             formatted_date = report_date.strftime("%Y-%m-%d")
-            report_data['date'] = formatted_date
         elif isinstance(report_date, str):
             formatted_date = report_date.split()[0]
+        else:
+            formatted_date = str(report_date)
         
         # Initialize Supabase client
         supabase = init_supabase()
         if not supabase:
             return False
             
-        # Prepare report data for Supabase
+        # Clean and format data for Supabase
         supabase_data = {
-            'id': report_data['id'],
-            'officer_name': officer_name,
+            'id': str(report_data['id']),
+            'officer_name': str(officer_name),
             'date': formatted_date,
-            'type': report_data['type'],
-            'status': report_data.get('status', 'Pending Review'),
-            'company_name': report_data.get('company_name'),
-            'companies_assigned': report_data.get('companies_assigned'),
-            'total_companies': report_data.get('total_companies'),
-            'total_years': report_data.get('total_years'),
-            'tasks': report_data.get('tasks'),
-            'challenges': report_data.get('challenges'),
-            'solutions': report_data.get('solutions'),
-            'frequency': report_data.get('frequency'),
-            'review_date': report_data.get('review_date'),
-            'reviewer_notes': report_data.get('reviewer_notes'),
-            'comments': json.dumps(report_data.get('comments', [])),
-            'report_data': json.dumps(report_data)  # Store complete report data
+            'type': str(report_data['type']),
+            'status': str(report_data.get('status', 'Pending Review')),
+            'company_name': str(report_data.get('company_name', '')) if report_data.get('company_name') else None,
+            'companies_assigned': str(report_data.get('companies_assigned', '')) if report_data.get('companies_assigned') else '',
+            'total_companies': int(float(report_data.get('total_companies', 0))) if report_data.get('total_companies') is not None else 0,
+            'total_years': int(float(report_data.get('total_years', 0))) if report_data.get('total_years') is not None else 0,
+            'tasks': str(report_data.get('tasks', '')),
+            'challenges': str(report_data.get('challenges', '')),
+            'solutions': str(report_data.get('solutions', '')),
+            'frequency': str(report_data.get('frequency', '')) if report_data.get('frequency') else None,
+            'review_date': str(report_data.get('review_date', '')) if report_data.get('review_date') else None,
+            'reviewer_notes': str(report_data.get('reviewer_notes', '')) if report_data.get('reviewer_notes') else None,
+            'comments': report_data.get('comments', []),
+            'report_data': json.dumps(report_data)  # Ensure report_data is properly JSON serialized
         }
+        
+        # Remove None values to prevent JSON errors
+        supabase_data = {k: v for k, v in supabase_data.items() if v is not None}
         
         # Save to Supabase
         response = supabase.table('reports').upsert(supabase_data).execute()
-        return True if response else False
+        
+        # Check if data was actually saved
+        if response and response.data:
+            st.success("✅ Report successfully saved to Supabase")
+            return True
+        else:
+            st.warning("⚠️ Report may not have been saved properly")
+            return False
         
     except Exception as e:
         st.error(f"Error saving report to Supabase: {str(e)}")
