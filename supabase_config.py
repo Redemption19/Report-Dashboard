@@ -1,7 +1,7 @@
 import streamlit as st
 from supabase import create_client
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 import pandas as pd
@@ -337,16 +337,39 @@ def schedule_auto_backup():
         if 'last_backup' not in st.session_state:
             st.session_state.last_backup = None
         
-        # Check if backup is needed
         now = datetime.now()
+        
+        # Check if backup is needed
         if (st.session_state.last_backup is None or 
             (now - st.session_state.last_backup).days >= 1):
             
+            st.info("🔄 Starting daily backup...")
             if auto_backup_to_supabase():
                 st.session_state.last_backup = now
-                st.success("✅ Scheduled backup completed successfully")
+                st.success(f"✅ Daily backup completed successfully at {now.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                # Calculate and show next backup time
+                next_backup = now + timedelta(days=1)
+                next_backup = next_backup.replace(hour=0, minute=0, second=0)  # Reset to start of next day
+                st.info(f"📅 Next backup scheduled for: {next_backup.strftime('%Y-%m-%d %H:%M:%S')}")
             else:
                 st.error("❌ Scheduled backup failed")
+        else:
+            # Show remaining time until next backup
+            next_backup = st.session_state.last_backup + timedelta(days=1)
+            time_remaining = next_backup - now
+            hours_remaining = int(time_remaining.total_seconds() / 3600)
+            minutes_remaining = int((time_remaining.total_seconds() % 3600) / 60)
+            
+            # Store last backup time for reference
+            last_backup_time = st.session_state.last_backup.strftime('%Y-%m-%d %H:%M:%S')
+            
+            st.info(f"""
+                ⏰ Backup Status:
+                - Last backup: {last_backup_time}
+                - Next backup in: {hours_remaining}h {minutes_remaining}m
+                - Backup frequency: Daily
+            """)
     
     except Exception as e:
         st.error(f"❌ Error in scheduled backup: {str(e)}")
@@ -419,4 +442,52 @@ def delete_task_from_supabase(task_id):
         
     except Exception as e:
         st.error(f"Error deleting task from Supabase: {str(e)}")
-        return False 
+        return False
+
+def import_report_from_excel(file, officer_name):
+    """Import report data from Excel file"""
+    try:
+        # Read Excel file
+        df = pd.read_excel(file)
+        
+        # Expected columns in Excel
+        required_columns = [
+            'date', 'type', 'company_name', 'companies_assigned',
+            'total_companies', 'total_years', 'tasks', 
+            'challenges', 'solutions', 'frequency'
+        ]
+        
+        # Validate columns
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            st.error(f"Missing required columns: {', '.join(missing_columns)}")
+            return False
+            
+        # Convert DataFrame to report format
+        for _, row in df.iterrows():
+            report_data = {
+                'id': str(uuid.uuid4()),
+                'date': row['date'].strftime('%Y-%m-%d') if hasattr(row['date'], 'strftime') else row['date'],
+                'type': row['type'],
+                'status': 'Pending Review',
+                'company_name': row['company_name'],
+                'companies_assigned': str(row['companies_assigned']),
+                'total_companies': int(row['total_companies']),
+                'total_years': int(row['total_years']),
+                'tasks': str(row['tasks']),
+                'challenges': str(row['challenges']),
+                'solutions': str(row['solutions']),
+                'frequency': row['frequency'],
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # Save report
+            if not save_report_to_supabase(officer_name, report_data):
+                st.error(f"Failed to save report for date: {report_data['date']}")
+                continue
+                
+        return True
+        
+    except Exception as e:
+        st.error(f"Error importing Excel file: {str(e)}")
+        return False
