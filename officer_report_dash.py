@@ -2264,16 +2264,26 @@ def create_dashboard():
     # Activity Heatmap
     st.subheader("Report Activity Patterns")
     
-    # Create heatmap data
-    df['dow'] = df['date'].dt.dayofweek
-    df['hour'] = df['date'].dt.hour
+    # Create heatmap data using submission_time instead of date
+    df['dow'] = df['submission_date'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d %H:%M:%S').weekday() if pd.notnull(x) else df['date'].dt.dayofweek)
+    df['hour'] = df['submission_date'].apply(lambda x: datetime.strptime(x, '%Y-%m-%d %H:%M:%S').hour if pd.notnull(x) else 0)
     activity_data = df.groupby(['dow', 'hour']).size().unstack(fill_value=0)
+    
+    # Reorder days to start with Monday
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    activity_data.index = pd.Categorical(
+        [day_order[i] for i in activity_data.index], 
+        categories=day_order, 
+        ordered=True
+    )
+    activity_data = activity_data.sort_index()
     
     fig_heatmap = go.Figure(data=go.Heatmap(
         z=activity_data.values,
-        x=[f"{i}:00" for i in range(24)],
-        y=['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
-        colorscale='Viridis'
+        x=[f"{i:02d}:00" for i in range(24)],  # Format hours as 00:00
+        y=day_order,
+        colorscale='Viridis',
+        hovertemplate="Day: %{y}<br>Hour: %{x}<br>Reports: %{z}<extra></extra>"
     ))
     
     fig_heatmap.update_layout(
@@ -2427,9 +2437,6 @@ def create_dashboard():
             use_container_width=True
         )
     
-        # After your charts and before the DataTable, add this section:
-    
-    # Report Review Section
         # Report Review Section in your dashboard
     st.subheader("📋 Recent Reports for Review")
     
