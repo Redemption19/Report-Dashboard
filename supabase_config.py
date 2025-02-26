@@ -41,6 +41,15 @@ def save_report_to_supabase(officer_name, report_data):
         if not supabase:
             return False
             
+        # Handle numeric values safely
+        def safe_int_convert(value, default=0):
+            try:
+                if pd.isna(value) or value is None:
+                    return default
+                return int(float(value))
+            except (ValueError, TypeError):
+                return default
+            
         # Clean and format data for Supabase
         supabase_data = {
             'id': str(report_data['id']),
@@ -50,8 +59,8 @@ def save_report_to_supabase(officer_name, report_data):
             'status': str(report_data.get('status', 'Pending Review')),
             'company_name': str(report_data.get('company_name', '')) if report_data.get('company_name') else None,
             'companies_assigned': str(report_data.get('companies_assigned', '')) if report_data.get('companies_assigned') else '',
-            'total_companies': int(float(report_data.get('total_companies', 0))) if report_data.get('total_companies') is not None else 0,
-            'total_years': int(float(report_data.get('total_years', 0))) if report_data.get('total_years') is not None else 0,
+            'total_companies': safe_int_convert(report_data.get('total_companies')),
+            'total_years': safe_int_convert(report_data.get('total_years')),
             'tasks': str(report_data.get('tasks', '')),
             'challenges': str(report_data.get('challenges', '')),
             'solutions': str(report_data.get('solutions', '')),
