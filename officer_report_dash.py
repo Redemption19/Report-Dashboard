@@ -2765,7 +2765,7 @@ def create_dashboard():
         else:
             st.info("No reports needing attention")
             
-# Create DataFrame for the table
+# # Create DataFrame for the table
     df_data = []
     for report in all_reports:
         # Get companies assigned string for Global Deposit reports
@@ -2776,14 +2776,14 @@ def create_dashboard():
         # Format submission time properly - use submission_date instead of submission_time
         submission_time = report.get('submission_date', '')  # Changed from submission_time
         if not submission_time:
-            submission_time = 'No submission time'  # Don't default to current time
+            submission_time = None  # Show None instead of 'No submission time'
         
         row = {
-            'type': report.get('type'),
+            'type': report.get('type'),  # Removed default 'N/A'
             'frequency': report.get('frequency'),
             'submission_time': submission_time,
             'date': report.get('date'),
-            'officer_name': report.get('officer_name', 'Unknown'),
+            'officer_name': report.get('officer_name', 'Unknown'),  # Keep 'Unknown' for officer_name
             'tasks': report.get('tasks'),
             'challenges': report.get('challenges'),
             'solutions': report.get('solutions'),
@@ -2795,7 +2795,7 @@ def create_dashboard():
             'total_years': report.get('total_years'),
             'dow': report.get('dow'),
             'hour': report.get('hour'),
-            'status': report.get('status', 'Pending Review'),
+            'status': report.get('status', 'Pending Review'),  # Keep default status
             'review_date': report.get('review_date', ''),
             'reviewer_notes': report.get('reviewer_notes', ''),
             'comments': report.get('comments', [])
