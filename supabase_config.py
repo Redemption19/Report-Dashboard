@@ -59,7 +59,7 @@ def save_report_to_supabase(officer_name, report_data):
             'id': str(report_data['id']),
             'officer_name': str(officer_name),
             'date': formatted_date,
-            'submission_time': formatted_submission_time,  # Add exact submission time
+            'submission_time': formatted_submission_time,
             'type': str(report_data['type']),
             'status': str(report_data.get('status', 'Pending Review')),
             'company_name': str(report_data.get('company_name', '')) if report_data.get('company_name') else None,

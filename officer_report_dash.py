@@ -2,6 +2,10 @@ import uuid
 import streamlit as st
 import os
 import json
+import time
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import smtplib
 from datetime import datetime, timedelta
 import pandas as pd
 import shutil
@@ -29,6 +33,8 @@ from supabase_config import (
     restore_from_supabase,
     schedule_auto_backup
 )
+
+from performance_dashboard import PerformanceDashboard
 
 
 # Add these imports at the top of your file
@@ -139,9 +145,27 @@ def save_report(officer_name, report_data):
         st.error(f"❌ Error saving report: {str(e)}")
         return None
 
+
+def add_notification(subject, message, notification_type):
+    """Add a notification to session state"""
+    if 'notifications' not in st.session_state:
+        st.session_state.notifications = []
+    
+    notification = {
+        "type": notification_type,
+        "subject": subject,
+        "message": message,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    st.session_state.notifications.append(notification)
+
 def review_reports():
     """Review pending reports and update their status"""
     st.subheader("Review Reports")
+    
+    # Initialize notification system
+    notification_system = NotificationSystem()
     
     # Load reports
     reports_data = load_reports()
@@ -151,22 +175,67 @@ def review_reports():
         st.info("No reports pending review")
         return
     
+    # Display notifications if any exist
+    if 'notifications' in st.session_state and st.session_state.notifications:
+        with st.expander("📫 Recent Notifications", expanded=True):
+            for notification in reversed(st.session_state.notifications[-5:]):
+                color = {
+                    "success": "#28a745",
+                    "warning": "#ffc107",
+                    "error": "#dc3545"
+                }.get(notification["type"], "#17a2b8")
+                
+                st.markdown(f"""
+                    <div style='padding: 10px; 
+                        border-left: 4px solid {color}; 
+                        background: rgba(0,0,0,0.05); 
+                        margin-bottom: 10px;'>
+                        <strong>{notification["subject"]}</strong><br>
+                        {notification["message"]}<br>
+                        <small style="opacity: 0.7">{notification["timestamp"]}</small>
+                    </div>
+                """, unsafe_allow_html=True)
+    
     # Display pending reports in an expandable format
     for report in pending_reports:
-        with st.expander(f"📄 {report.get('title', 'Untitled Report')} - {report.get('officer_name', 'Unknown Officer')}"):
+        # Format submission time - preserve original submission time
+        submission_time = report.get('submission_time', '')
+        if submission_time:
+            try:
+                if isinstance(submission_time, str):
+                    formatted_time = datetime.strptime(submission_time, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    formatted_time = submission_time.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                formatted_time = "No submission time"
+        else:
+            formatted_time = "No submission time"
+
+        with st.expander(f"📄 {report.get('officer_name', 'Unknown Officer')} - {formatted_time}"):
             # Report Details
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.write("**Officer:**", report.get('officer_name', 'Unknown'))
-                st.write("**Date:**", report.get('date', 'No date'))
                 st.write("**Type:**", report.get('type', 'No type'))
+                st.write("**Frequency:**", report.get('frequency', 'No frequency'))
             with col2:
+                st.write("**Submission Time:**", formatted_time)
                 st.write("**Status:**", report.get('status', 'Unknown'))
-                st.write("**Priority:**", report.get('priority', 'No priority'))
+                st.write("**Company:**", report.get('company_name', 'No company'))
+            with col3:
+                st.write("**Total Companies:**", report.get('total_companies', 'N/A'))
+                st.write("**Total Years:**", report.get('total_years', 'N/A'))
+                st.write("**Total Files:**", report.get('total_schedule_files', 'N/A'))
             
             # Report Content
-            st.write("**Content:**")
-            st.write(report.get('content', 'No content available'))
+            st.write("**Tasks:**")
+            st.write(report.get('tasks', 'No tasks available'))
+            
+            st.write("**Challenges:**")
+            st.write(report.get('challenges', 'No challenges reported'))
+            
+            st.write("**Solutions:**")
+            st.write(report.get('solutions', 'No solutions provided'))
             
             # Attachments if any
             if 'attachments' in report and report['attachments']:
@@ -175,28 +244,76 @@ def review_reports():
                     st.write(f"- {attachment}")
             
             # Review Actions
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Approve", key=f"approve_{report.get('id', '')}"):
-                    # Update report status
-                    report['status'] = 'Approved'
-                    report['review_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    report['reviewer_notes'] = st.session_state.get(f"notes_{report.get('id', '')}", '')
-                    # Use the existing save_report function with correct parameters
-                    save_report(report.get('officer_name', 'Unknown'), report)
-                    st.success("Report approved!")
-                    st.rerun()
+                    reviewer_notes = st.session_state.get(f"notes_{report.get('id', '')}", '')
+                    try:
+                        # Update report status but preserve submission_time
+                        report['status'] = 'Approved'
+                        report['review_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        report['reviewer_notes'] = reviewer_notes
+                        
+                        # Save report
+                        save_report(report.get('officer_name', 'Unknown'), report)
+                        
+                        # Send notification
+                        notification_system.send_approval_notification(
+                            report_data={
+                                **report,
+                                'officer_email': get_officer_email(report.get('officer_name', 'Unknown'))
+                            },
+                            reviewer_notes=reviewer_notes
+                        )
+                        
+                        # Add notification
+                        add_notification(
+                            subject="Report Approved ✅",
+                            message=f"Report from {report.get('officer_name', 'Unknown')} has been approved.",
+                            notification_type="success"
+                        )
+                        
+                        st.success("Report approved and notification sent!")
+                        time.sleep(1)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error processing approval: {str(e)}")
             
             with col2:
                 if st.button("⚠️ Needs Attention", key=f"attention_{report.get('id', '')}"):
-                    # Update report status
-                    report['status'] = 'Needs Attention'
-                    report['review_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    report['reviewer_notes'] = st.session_state.get(f"notes_{report.get('id', '')}", '')
-                    # Use the existing save_report function with correct parameters
-                    save_report(report.get('officer_name', 'Unknown'), report)
-                    st.warning("Report marked as needing attention!")
-                    st.rerun()
+                    reviewer_notes = st.session_state.get(f"notes_{report.get('id', '')}", '')
+                    try:
+                        # Update report status but preserve submission_time
+                        report['status'] = 'Needs Attention'
+                        report['review_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        report['reviewer_notes'] = reviewer_notes
+                        
+                        # Save report
+                        save_report(report.get('officer_name', 'Unknown'), report)
+                        
+                        # Send notification
+                        notification_system.send_rejection_notification(
+                            report_data={
+                                **report,
+                                'officer_email': get_officer_email(report.get('officer_name', 'Unknown'))
+                            },
+                            rejection_reason=reviewer_notes
+                        )
+                        
+                        # Add notification
+                        add_notification(
+                            subject="Report Needs Attention ⚠️",
+                            message=f"Report from {report.get('officer_name', 'Unknown')} needs attention.",
+                            notification_type="warning"
+                        )
+                        
+                        st.warning("Report marked as needing attention and notification sent!")
+                        time.sleep(1)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error processing rejection: {str(e)}")
             
             # Reviewer Notes
             st.text_area(
@@ -204,6 +321,97 @@ def review_reports():
                 key=f"notes_{report.get('id', '')}",
                 placeholder="Add your review notes here..."
             )
+
+def get_officer_email(officer_name):
+    """Get officer email from configuration or database"""
+    try:
+        with open('config/officer_emails.json', 'r') as f:
+            email_config = json.load(f)
+            return email_config.get(officer_name, f"{officer_name.lower().replace(' ', '.')}@company.com")
+    except:
+        # Return a default email format if config not found
+        return f"{officer_name.lower().replace(' ', '.')}@company.com"
+
+class NotificationSystem:
+    """Handles email notifications"""
+    def __init__(self):
+        self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
+        self.sender_email = os.getenv('SENDER_EMAIL', '')
+        self.sender_password = os.getenv('SENDER_PASSWORD', '')
+    
+    def send_email(self, recipient_email, subject, message):
+        """Send email if configured, otherwise log the message"""
+        if not all([self.sender_email, self.sender_password]):
+            # Log the notification instead of sending email if not configured
+            st.info(f"Email would be sent to {recipient_email}: {subject}")
+            return True
+            
+        try:
+            msg = MIMEMultipart('alternative')
+            msg['From'] = self.sender_email
+            msg['To'] = recipient_email
+            msg['Subject'] = subject
+            
+            # Create HTML version of message
+            html_content = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif;">
+                    <div style="padding: 20px; background: #f8f9fa;">
+                        <h2>{subject}</h2>
+                        <div style="white-space: pre-line;">{message}</div>
+                    </div>
+                </body>
+            </html>
+            """
+            
+            msg.attach(MIMEText(message, 'plain'))
+            msg.attach(MIMEText(html_content, 'html'))
+            
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.send_message(msg)
+            return True
+        except Exception as e:
+            st.error(f"Failed to send email: {str(e)}")
+            return False
+    
+    def send_approval_notification(self, report_data, reviewer_notes=""):
+        """Send approval notification"""
+        subject = "Report Approved ✅"
+        message = f"""
+        Your report has been approved!
+        
+        Report Details:
+        - Type: {report_data.get('type', 'Unknown')}
+        - Submission Date: {report_data.get('submission_time', 'Unknown')}
+        - Review Date: {report_data.get('review_date', 'Unknown')}
+        
+        Reviewer Notes:
+        {reviewer_notes if reviewer_notes else "No additional notes provided."}
+        """
+        
+        return self.send_email(report_data['officer_email'], subject, message)
+    
+    def send_rejection_notification(self, report_data, rejection_reason=""):
+        """Send rejection notification"""
+        subject = "Report Needs Attention ⚠️"
+        message = f"""
+        Your report requires attention.
+        
+        Report Details:
+        - Type: {report_data.get('type', 'Unknown')}
+        - Submission Date: {report_data.get('submission_time', 'Unknown')}
+        - Review Date: {report_data.get('review_date', 'Unknown')}
+        
+        Reviewer Notes:
+        {rejection_reason if rejection_reason else "No specific reason provided."}
+        
+        Please review and update your report accordingly.
+        """
+        
+        return self.send_email(report_data['officer_email'], subject, message)
 def load_reports(officer_folder=None):
     """Load all reports from all officer folders or a specific officer folder"""
     reports_data = []
@@ -374,6 +582,7 @@ def report_form():
                 "frequency": frequency,  # Make sure frequency is included in report_data
                 "officer_name": officer_name,
                 "date": datetime.now().strftime("%Y-%m-%d"),
+                "submission_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # Add this line
                 "company_name": company_name,
                 "tasks": tasks,
                 "challenges": challenges,
@@ -540,6 +749,7 @@ def view_reports():
                 # Create DataFrame
                 df = pd.DataFrame([{
                     'Date': r.get('date', 'N/A'),
+                    'Submission Time': r.get('submission_time', 'N/A'),  # Add this line
                     'Officer': r.get('officer_name', 'N/A'),
                     'Frequency': r.get('frequency', 'N/A'),
                     'Company': r.get('company_name', 'N/A'),
@@ -630,6 +840,11 @@ def view_reports():
                             format="YYYY-MM-DD",
                             width="medium"
                         ),
+                        "Submission Time": st.column_config.DatetimeColumn(  # Add this configuration
+                            "Submission Time",
+                            format="YYYY-MM-DD HH:mm:ss",
+                            width="medium"
+                        ),
                         "Officer": st.column_config.TextColumn(
                             "Officer",
                             width="medium"
@@ -679,6 +894,7 @@ def view_reports():
                 # Create DataFrame
                 df = pd.DataFrame([{
                     'Date': r.get('date', 'N/A'),
+                    'Submission Time': r.get('submission_time', 'N/A'),  # Add this line
                     'Officer': r.get('officer_name', 'N/A'),
                     'Frequency': r.get('frequency', 'N/A'),
                     'Companies': r.get('companies_assigned', '').strip().replace('\n', ', '),
@@ -769,6 +985,11 @@ def view_reports():
                             format="YYYY-MM-DD",
                             width="medium"
                         ),
+                        "Submission Time": st.column_config.DatetimeColumn(  # Add this configuration
+                            "Submission Time",
+                            format="YYYY-MM-DD HH:mm:ss",
+                            width="medium"
+                        ),
                         "Officer": st.column_config.TextColumn(
                             "Officer",
                             width="medium"
@@ -809,6 +1030,7 @@ def view_reports():
             if other_reports:
                 df = pd.DataFrame([{
                     'Date': r.get('date', 'N/A'),
+                    'Submission Time': r.get('submission_time', 'N/A'),  # Add this line
                     'Officer': r.get('officer_name', 'Unknown'),
                     'Frequency': r.get('frequency', 'Daily'),
                     'Company': r.get('company_name', 'N/A'),
@@ -828,6 +1050,11 @@ def view_reports():
                         "Date": st.column_config.DateColumn(
                             "Date",
                             format="YYYY-MM-DD",
+                            width="medium"
+                        ),
+                        "Submission Time": st.column_config.DatetimeColumn(  # Add this configuration
+                            "Submission Time",
+                            format="YYYY-MM-DD HH:mm:ss",
                             width="medium"
                         ),
                         "Officer": st.column_config.TextColumn(
@@ -2537,56 +2764,54 @@ def create_dashboard():
                             st.error(f"Error approving report: {str(e)}")
         else:
             st.info("No reports needing attention")
-
-    
-        # Data Table Section
-    st.subheader("Report Data Table")
-    
-    # Create DataFrame for the table
+            
+# Create DataFrame for the table
     df_data = []
     for report in all_reports:
         # Get companies assigned string for Global Deposit reports
         companies_assigned = report.get('companies_assigned', '')
         if isinstance(companies_assigned, str):
             companies_assigned = companies_assigned.strip().replace('\n', ', ')
-        
-        # Handle company name based on report type
-        if report.get('type') == "Global Deposit Assigning":
-            company_name = "Global Deposit"  # Set a default value for Global Deposit reports
-        else:
-            company_name = report.get('company_name', 'N/A')
-        
-        # Get the full datetime from submission_date
-        submission_datetime = report.get('submission_date', report.get('date', 'N/A'))
-        if isinstance(submission_datetime, str):
-            try:
-                # Parse the datetime string
-                parsed_datetime = datetime.strptime(submission_datetime, '%Y-%m-%d %H:%M:%S')
-                formatted_datetime = parsed_datetime.strftime('%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                formatted_datetime = submission_datetime
-        else:
-            formatted_datetime = submission_datetime
             
+        # Format submission time properly - use submission_date instead of submission_time
+        submission_time = report.get('submission_date', '')  # Changed from submission_time
+        if not submission_time:
+            submission_time = 'No submission time'  # Don't default to current time
+        
         row = {
-            'Date': formatted_datetime,
-            'Officer': report.get('officer_name', 'Unknown'),
-            'Type': report.get('type', 'N/A'),
-            'Status': report.get('status', 'Pending Review'),  # Set default status if not present
-            'Frequency': report.get('frequency', 'N/A'),
-            'Company': company_name,
-            'Total Years': report.get('total_years', 'N/A'),
-            'Companies Assigned': companies_assigned,
-            'Total Companies': report.get('total_companies', 'N/A'),
-            'Tasks': report.get('tasks', 'N/A')[:100] + '...' if len(report.get('tasks', 'N/A')) > 100 else report.get('tasks', 'N/A'),
-            'Challenges': report.get('challenges', 'N/A')[:100] + '...' if len(report.get('challenges', 'N/A')) > 100 else report.get('challenges', 'N/A'),
-            'Solutions': report.get('solutions', 'N/A')[:100] + '...' if len(report.get('solutions', 'N/A')) > 100 else report.get('solutions', 'N/A'),
+            'type': report.get('type'),
+            'frequency': report.get('frequency'),
+            'submission_time': submission_time,
+            'date': report.get('date'),
+            'officer_name': report.get('officer_name', 'Unknown'),
+            'tasks': report.get('tasks'),
+            'challenges': report.get('challenges'),
+            'solutions': report.get('solutions'),
+            'attachments': report.get('attachments', []),
+            'companies_assigned': companies_assigned,
+            'total_companies': report.get('total_companies'),
+            'company_name': report.get('company_name'),
+            'total_schedule_files': report.get('total_schedule_files'),
+            'total_years': report.get('total_years'),
+            'dow': report.get('dow'),
+            'hour': report.get('hour'),
+            'status': report.get('status', 'Pending Review'),
+            'review_date': report.get('review_date', ''),
+            'reviewer_notes': report.get('reviewer_notes', ''),
+            'comments': report.get('comments', [])
         }
         df_data.append(row)
-    
-    # Convert to DataFrame
+        # Create DataFrame
     df = pd.DataFrame(df_data)
-    
+    # Remove the id column if it exists
+    if 'id' in df.columns:
+        df = df.drop('id', axis=1)
+
+    # Hide date column from view while keeping it in the data
+    if 'date' in df.columns:
+        df = df.drop('date', axis=1)
+
+    st.header("Report Data Table")
     # Export buttons
     st.write("Export Options:")
     col1, col2, col3 = st.columns([1, 1, 1])
@@ -2696,59 +2921,70 @@ def create_dashboard():
         except Exception as e:
             st.error(f"Error generating PDF: {str(e)}")
 
-    # Add a small space between buttons and table
-    st.write("")
-    
-    # Display the data table with enhanced column configuration
+
+      # Display the data table with enhanced column configuration
     st.dataframe(
         df,
         column_config={
-            "Date": st.column_config.DatetimeColumn(
-                "Date & Time",
-                format="YYYY-MM-DD HH:mm:ss",
-                help="Report submission date and time"
-            ),
-            "Officer": st.column_config.TextColumn("Officer"),
-            "Type": st.column_config.TextColumn(
+            "type": st.column_config.TextColumn(
                 "Report Type",
                 help="Schedule Upload Report or Global Deposit Assigning"
             ),
-            "Status": st.column_config.TextColumn(
-                "Status",
-                help="Current status of the report"
-            ),
-            "Frequency": st.column_config.TextColumn(
+            "frequency": st.column_config.TextColumn(
                 "Frequency",
                 help="Daily, Weekly, or Monthly"
             ),
-            "Company": st.column_config.TextColumn(
-                "Company",
-                width="medium"
+            "submission_time": st.column_config.DatetimeColumn(
+                "Submission Date & Time",
+                format="YYYY-MM-DD HH:mm:ss"
             ),
-            "Total Years": st.column_config.NumberColumn(
-                "Total Years",
-                width="small"
-            ),
-            "Companies Assigned": st.column_config.TextColumn(
-                "Companies Assigned",
-                width="large"
-            ),
-            "Total Companies": st.column_config.NumberColumn(
-                "Total Companies",
-                width="small"
-            ),
-            "Tasks": st.column_config.TextColumn(
+            "date": st.column_config.DateColumn("Date"),
+            "officer_name": st.column_config.TextColumn("Officer Name"),
+            "tasks": st.column_config.TextColumn(
                 "Tasks",
                 width="large"
             ),
-            "Challenges": st.column_config.TextColumn(
+            "challenges": st.column_config.TextColumn(
                 "Challenges",
                 width="large"
             ),
-            "Solutions": st.column_config.TextColumn(
+            "solutions": st.column_config.TextColumn(
                 "Solutions",
                 width="large"
-            )
+            ),
+            "attachments": st.column_config.TextColumn("Attachments"),
+            "companies_assigned": st.column_config.TextColumn(
+                "Companies Assigned",
+                width="large"
+            ),
+            "total_companies": st.column_config.NumberColumn(
+                "Total Companies",
+                width="small"
+            ),
+            "company_name": st.column_config.TextColumn(
+                "Company Name",
+                width="medium"
+            ),
+            "total_schedule_files": st.column_config.NumberColumn(
+                "Total Schedule Files",
+                width="small"
+            ),
+            "total_years": st.column_config.NumberColumn(
+                "Total Years",
+                width="small"
+            ),
+            "dow": st.column_config.TextColumn("Day of Week"),
+            "hour": st.column_config.NumberColumn("Hour"),
+            "status": st.column_config.TextColumn(
+                "Status",
+                help="Current status of the report"
+            ),
+            "review_date": st.column_config.DateColumn("Review Date"),
+            "reviewer_notes": st.column_config.TextColumn(
+                "Reviewer Notes",
+                width="large"
+            ),
+            "comments": st.column_config.TextColumn("Comments")
         },
         hide_index=True,
         use_container_width=True
@@ -2874,8 +3110,7 @@ def submit_report():
         )
     
     with col3:
-        if report_category != "Other Report":
-            report_frequency = st.selectbox("Frequency", ["Daily", "Weekly", "Monthly"])
+        report_frequency = st.selectbox("Frequency", ["Daily", "Weekly", "Monthly"])
     
     # Officer selection with option to add new
     officer_name = st.selectbox(
@@ -2991,20 +3226,19 @@ def submit_report():
                     "submission_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "review_date": None,
                     "reviewer_notes": None,
-                    "priority": "Normal"  # Default priority
+                    "priority": "Normal",  # Default priority
+                    "frequency": report_frequency  # Add frequency for all report types
                 }
                 
                 # Add type-specific fields
                 if report_category == "Schedule Upload Report":
                     report_data.update({
-                        "frequency": report_frequency,
                         "company_name": company_name,
                         "total_schedule_files": total_files,
                         "total_years": total_years
                     })
                 elif report_category == "Global Deposit Assigning":
                     report_data.update({
-                        "frequency": report_frequency,
                         "companies_assigned": companies_assigned,
                         "total_companies": total_companies
                     })
@@ -3025,8 +3259,7 @@ def submit_report():
                     st.write(f"**Report ID:** {report_data['id']}")
                     st.write(f"**Officer:** {officer_name}")
                     st.write(f"**Type:** {report_category}")
-                    if report_category != "Other Report":
-                        st.write(f"**Frequency:** {report_frequency}")
+                    st.write(f"**Frequency:** {report_frequency}")  # Show frequency for all report types
                     st.info("Your report will be reviewed by a manager soon.")
                 
                 # Wait a moment before rerunning
@@ -3533,14 +3766,15 @@ def show_found_reports(found_reports):
             # Create DataFrame
             df = pd.DataFrame([{
                 'Date': r.get('date', 'N/A'),
+                'Submission Time': r.get('submission_time', 'N/A'),  # Add this line
                 'Officer': r.get('officer_name', 'N/A'),
                 'Frequency': r.get('frequency', 'N/A'),
                 'Company For Schedule Upload': r.get('company_name', 'N/A'),
                 'Files': r.get('total_schedule_files', 0),
                 'Years': r.get('total_years', 0),
-                'Tasks': r.get('tasks', 'N/A'),
-                'Challenges': r.get('challenges', 'N/A'),
-                'Solutions': r.get('solutions', 'N/A')
+                'Tasks': r.get('tasks', 'N/A')[:100] + '...' if len(r.get('tasks', 'N/A')) > 100 else r.get('tasks', 'N/A'),
+                'Challenges': r.get('challenges', 'N/A')[:100] + '...' if len(r.get('challenges', 'N/A')) > 100 else r.get('challenges', 'N/A'),
+                'Solutions': r.get('solutions', 'N/A')[:100] + '...' if len(r.get('solutions', 'N/A')) > 100 else r.get('solutions', 'N/A')
             } for r in schedule_reports])
 
             # Export buttons
@@ -3626,6 +3860,11 @@ def show_found_reports(found_reports):
                         format="YYYY-MM-DD",
                         width="medium"
                     ),
+                    "Submission Time": st.column_config.DatetimeColumn(  # Add this configuration
+                        "Submission Time",
+                        format="YYYY-MM-DD HH:mm:ss",
+                        width="medium"
+                    ),
                     "Officer": st.column_config.TextColumn(
                         "Officer",
                         width="medium"
@@ -3675,6 +3914,7 @@ def show_found_reports(found_reports):
             # Create DataFrame
             df = pd.DataFrame([{
                 'Date': r.get('date', 'N/A'),
+                'Submission Time': r.get('submission_time', 'N/A'),  # Add this line
                 'Officer': r.get('officer_name', 'N/A'),
                 'Frequency': r.get('frequency', 'N/A'),
                 'Companies': r.get('companies_assigned', '').strip().replace('\n', ', '),
@@ -3773,6 +4013,7 @@ def show_found_reports(found_reports):
         if other_reports:
             df = pd.DataFrame([{
                 'Date': r.get('date', 'N/A'),
+                'Submission Time': r.get('submission_time', 'N/A'),  # Add this line
                 'Officer': r.get('officer_name', 'Unknown'),
                 'Frequency': r.get('frequency', 'Daily'),
                 'Company': r.get('company_name', 'N/A'),
@@ -3792,6 +4033,11 @@ def show_found_reports(found_reports):
                     "Date": st.column_config.DateColumn(
                         "Date",
                         format="YYYY-MM-DD",
+                        width="medium"
+                    ),
+                    "Submission Time": st.column_config.DatetimeColumn(  # Add this configuration
+                        "Submission Time",
+                        format="YYYY-MM-DD HH:mm:ss",
                         width="medium"
                     ),
                     "Officer": st.column_config.TextColumn(
@@ -4540,48 +4786,52 @@ def main():
     """Main dashboard with navigation"""
     st.set_page_config(page_title="Officer Report Dashboard", layout="wide")
     
-    # Initialize session state for report submission if not exists
+    # Initialize session states
     if 'report_submitted' not in st.session_state:
         st.session_state.report_submitted = False
+    if 'notifications' not in st.session_state:
+        st.session_state.notifications = []
     
-    # Sidebar navigation with corrected mapping
+    # Sidebar navigation
     st.sidebar.title("Navigation")
+    
+    # Display notifications
+    if st.session_state.notifications:
+        with st.sidebar.expander("📫 Notifications", expanded=True):
+            for notification in reversed(st.session_state.notifications[-5:]):
+                timestamp = notification.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                st.markdown(f"""
+                    <div style='padding: 8px; 
+                        border-left: 3px solid {
+                            "#28a745" if notification["type"] == "success" else 
+                            "#dc3545" if notification["type"] == "error" else 
+                            "#ffc107" if notification["type"] == "warning" else "#17a2b8"
+                        };
+                        background: {
+                            "#d4edda" if notification["type"] == "success" else
+                            "#f8d7da" if notification["type"] == "error" else
+                            "#fff3cd" if notification["type"] == "warning" else "#cce5ff"
+                        };
+                        color: {
+                            "#155724" if notification["type"] == "success" else
+                            "#721c24" if notification["type"] == "error" else
+                            "#856404" if notification["type"] == "warning" else "#004085"
+                        };
+                        margin-bottom: 8px;
+                        border-radius: 4px;'>
+                        <strong>{notification["subject"]}</strong><br>
+                        {notification["message"]}<br>
+                        <small style="opacity: 0.8">{timestamp}</small>
+                    </div>
+                """, unsafe_allow_html=True)
+
+    # Your existing navigation code
     page = st.sidebar.radio(
         "Select a page",
         ["Dashboard", "Submit Report", "Edit Reports", "View Reports", "Report Summaries", 
-         "Task Management", "Manage Folders"]
+         "Task Management", "Manage Folders", "Performance"]
     )
     
-    # Handle page navigation with correct function mapping
-    if page == "Dashboard":
-        create_dashboard()  # Main Dashboard Analytics
-    elif page == "Submit Report":
-        submit_report()
-    elif page == "View Reports":
-        view_reports()
-    elif page == "Report Summaries":
-        show_summaries()  # Report Summaries Dashboard
-    elif page == "Task Management":
-        create_task_dashboard()
-    elif page == "Manage Folders":
-        manage_folders()
-
-if __name__ == "__main__":
-    st.set_page_config(page_title="Officer Report Dashboard", layout="wide")
-    
-    # Initialize session state for report submission if not exists
-    if 'report_submitted' not in st.session_state:
-        st.session_state.report_submitted = False
-    
-    # Sidebar navigation
-        st.sidebar.title("Navigation")
-    page = st.sidebar.radio(
-        "Select a page",
-        ["Dashboard", "Submit Report", "View Reports", "Report Summaries", 
-         "Task Management", "Manage Folders", "Edit Reports"]  # Added at the end
-    )
-    
-    # Handle page navigation
     if page == "Dashboard":
         try:
             create_dashboard()  # Main Dashboard Analytics
@@ -4612,28 +4862,17 @@ if __name__ == "__main__":
             manage_folders()
         except Exception as e:
             st.error(f"Error loading Manage Folders: {str(e)}")
-    elif page == "Edit Reports":  # Add this new section at the end
+    elif page == "Edit Reports":
         try:
             edit_report()
         except Exception as e:
             st.error(f"Error loading Edit Reports: {str(e)}")
+    elif page == "Performance":
+        try:
+            performance_dashboard = PerformanceDashboard(REPORTS_DIR)
+            performance_dashboard.render_dashboard()
+        except Exception as e:
+            st.error(f"Error loading Performance Dashboard: {str(e)}")
 
-# # Add these constants at the top of your file with other constants
-# TASK_DIR = "tasks"
-# TASK_STATUSES = ["Pending", "In Progress", "Completed", "Overdue"]
-# REPORT_STATUSES = ['Pending Review', 'Approved', 'Needs Attention']
-
-# def load_tasks():
-#     """Load all tasks from the tasks directory"""
-#     tasks = []
-#     try:
-#         if os.path.exists(TASK_DIR):
-#             for task_file in os.listdir(TASK_DIR):
-#                 if task_file.endswith('.json'):
-#                     with open(os.path.join(TASK_DIR, task_file), 'r') as f:
-#                         task = json.load(f)
-#                         tasks.append(task)
-#     except Exception as e:
-#         st.error(f"Error loading tasks: {str(e)}")
-#     return tasks
-
+if __name__ == "__main__":
+    main()
