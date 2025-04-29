@@ -23,7 +23,8 @@ from supabase_config import save_report_to_supabase
 from supabase_config import (
     save_report_to_supabase, 
     check_supabase_data, 
-    sync_local_to_supabase
+    sync_local_to_supabase,
+    load_reports_from_supabase
 )
 
 from supabase_config import (
@@ -413,10 +414,33 @@ class NotificationSystem:
         
         return self.send_email(report_data['officer_email'], subject, message)
 def load_reports(officer_folder=None):
-    """Load all reports from all officer folders or a specific officer folder"""
+    """Load all reports from all officer folders or a specific officer folder, prioritizing Supabase data"""
     reports_data = []
     try:
-        # If specific officer folder is provided
+        # First try to load from Supabase
+        supabase_reports = load_reports_from_supabase(officer_folder)
+        
+        if supabase_reports:
+            # If Supabase data exists, use it and sync to local
+            for report in supabase_reports:
+                officer_name = report.get('officer_name')
+                if officer_name:
+                    # Ensure officer directory exists
+                    officer_dir = os.path.join(REPORTS_DIR, officer_name)
+                    os.makedirs(officer_dir, exist_ok=True)
+                    
+                    # Save to local storage
+                    report_date = report.get('date', '')
+                    report_type = report.get('type', '').replace(' ', '_')
+                    filename = f"{report_date}_{report_type}.json"
+                    filepath = os.path.join(officer_dir, filename)
+                    
+                    with open(filepath, 'w') as f:
+                        json.dump(report, f, indent=4)
+            
+            return supabase_reports
+        
+        # If Supabase fails or returns no data, fall back to local storage
         if officer_folder:
             officer_path = os.path.join(REPORTS_DIR, officer_folder)
             if os.path.isdir(officer_path) and officer_folder not in ADDITIONAL_FOLDERS:
@@ -457,11 +481,17 @@ def load_reports(officer_folder=None):
                     except Exception as e:
                         st.error(f"Error loading report {report_file} for {officer_folder}: {str(e)}")
                         continue
-    
+        
+        # If we have local data but Supabase failed, try to sync to Supabase
+        if reports_data:
+            st.warning("⚠️ Using local data as Supabase fetch failed. Attempting to sync to Supabase...")
+            sync_local_to_supabase()
+        
+        return reports_data
+        
     except Exception as e:
         st.error(f"Error accessing reports directory: {str(e)}")
-    
-    return reports_data
+        return reports_data
 
 def load_template(template_name):
     """Load a report template from the Templates folder"""
@@ -4782,9 +4812,26 @@ def generate_report_summaries():
         st.error(f"An error occurred: {str(e)}")
         st.write("Please try again or contact support if the problem persists.")
 
+def initialize_data():
+    """Initialize data from Supabase on first run"""
+    if 'data_initialized' not in st.session_state:
+        st.session_state.data_initialized = False
+    
+    if not st.session_state.data_initialized:
+        with st.spinner("Loading data from Supabase..."):
+            reports = load_reports()
+            if reports:
+                st.success("✅ Data loaded successfully from Supabase")
+            else:
+                st.warning("⚠️ No data found in Supabase, using local data")
+            st.session_state.data_initialized = True
+
 def main():
     """Main dashboard with navigation"""
     st.set_page_config(page_title="Officer Report Dashboard", layout="wide")
+    
+    # Initialize data from Supabase
+    initialize_data()
     
     # Initialize session states
     if 'report_submitted' not in st.session_state:
@@ -4824,7 +4871,7 @@ def main():
                         <small style="opacity: 0.8">{timestamp}</small>
                     </div>
                 """, unsafe_allow_html=True)
-
+    
     # Your existing navigation code
     page = st.sidebar.radio(
         "Select a page",
