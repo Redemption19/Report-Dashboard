@@ -101,21 +101,31 @@ def load_reports_from_supabase(officer_name=None):
         if not supabase:
             return []
             
-        query = supabase.table('reports')
+        # Build the query
+        query = supabase.table('reports').select('*')
         
         if officer_name:
             query = query.eq('officer_name', officer_name)
         
+        # Execute the query and get the response
         response = query.execute()
+        
+        if not response or not response.data:
+            return []
         
         # Convert Supabase data back to original format
         reports = []
         for record in response.data:
             try:
                 # Parse the stored JSON data
-                report_data = json.loads(record['report_data'])
-                reports.append(report_data)
-            except:
+                if 'report_data' in record:
+                    report_data = json.loads(record['report_data'])
+                    reports.append(report_data)
+                else:
+                    # If no report_data field, use the record as is
+                    reports.append(record)
+            except Exception as e:
+                st.warning(f"Error parsing report data: {str(e)}")
                 # Fallback to raw record if JSON parsing fails
                 reports.append(record)
         
